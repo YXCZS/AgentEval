@@ -73,6 +73,24 @@ type OverviewData = {
   reports: ReportSummary[];
 };
 
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeTracePage(value: unknown): TraceSummaryPage {
+  const page = value && typeof value === "object" ? value as { items?: unknown; total?: unknown } : {};
+  return { items: asArray<TraceSummary>(page.items), total: asNumber(page.total) };
+}
+
+function normalizeRunPage(value: unknown): ExperimentPage {
+  const page = value && typeof value === "object" ? value as { items?: unknown; total?: unknown } : {};
+  return { items: asArray<Run>(page.items), total: asNumber(page.total) };
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "default-project";
 const SESSION = process.env.NEXT_PUBLIC_WORKSPACE_SESSION ?? "";
@@ -170,7 +188,16 @@ function Overview({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
         requestJson<ExperimentPage>(`/projects/${PROJECT_ID}/runs?limit=25`),
         requestJson<ReportSummary[]>(`/projects/${PROJECT_ID}/reports`),
       ]);
-      setData({ traces: tracePage.items, traceTotal: tracePage.total, datasets, runs: runPage.items, runTotal: runPage.total, reports });
+      const normalizedTracePage = normalizeTracePage(tracePage);
+      const normalizedRunPage = normalizeRunPage(runPage);
+      setData({
+        traces: normalizedTracePage.items,
+        traceTotal: normalizedTracePage.total,
+        datasets: asArray<Dataset>(datasets),
+        runs: normalizedRunPage.items,
+        runTotal: normalizedRunPage.total,
+        reports: asArray<ReportSummary>(reports),
+      });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "总览数据加载失败");
     } finally {

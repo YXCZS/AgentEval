@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Eval 原型 01：核心工作台</title>
+    <link rel="stylesheet" href="prototype.css" />
+  </head>
+  <body>
+    <main class="prototype-shell">
+      <header class="prototype-header">
+        <div>
+          <p class="prototype-kicker">Prototype 01 / Observe</p>
+          <h1>先看证据，再谈质量。</h1>
+        </div>
+        <p>
+          核心工作台原型：把 Trace、失败定位和近期评测放在一次浏览路径里。参考
+          Phoenix 的 trace-first 组织，也保留 Langfuse / LangSmith
+          常见的筛选与详情分栏。
+        </p>
+      </header>
+      <div class="reference-note">
+        <span>原创漫画作业本语气</span><span>浅色高可读数据区</span
+        ><span>不使用原作角色或素材</span>
+      </div>
+      <section class="prototype-grid">
+        <article class="direction">
+          <div class="direction-label">
+            <strong>A · 首页总览</strong><span>第一次进入时先知道下一步</span>
+          </div>
+          <div class="screen">
+            <div class="screen-bar">
+              <span class="brand-mark">AE</span><strong>Agent Eval</strong
+              ><small>评测工作台</small>
+            </div>
+            <div class="screen-main">
+              <nav class="screen-nav">
+                <p>工作区</p>
+                <button class="nav-link active">总览</button
+                ><button class="nav-link">Trace</button
+                ><button class="nav-link">数据集</button
+                ><button class="nav-link">实验</button>
+                <p class="nav-section-spaced">质量</p>
+                <button class="nav-link">评估器</button
+                ><button class="nav-link">回归</button>
+              </nav>
+              <div class="screen-content">
+                <div class="screen-title">
+                  <div>
+                    <h2>项目总览</h2>
+                    <p>客服知识库 Agent · 最近 24 小时</p>
+                  </div>
+                  <button class="button primary">＋ 新建实验</button>
+                </div>
+                <div class="stats">
+                  <div class="stat">
+                    <span>Trace</span><strong>1,284</strong>
+                  </div>
+                  <div class="stat">
+                    <span>本周通过率</span><strong>92%</strong>
+                  </div>
+                  <div class="stat">
+                    <span>待处理失败</span><strong>17</strong>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <strong>最近的运行</strong><span>查看全部 →</span>
+                  </div>
+                  <div class="rows">
+                    <button class="row">
+                      <i class="dot"></i
+                      ><span
+                        ><strong>客服问答 · v1.8</strong
+                        ><small>数据集 50 条 · 6 分钟前</small></span
+                      ><b>94%</b></button
+                    ><button class="row">
+                      <i class="dot warn"></i
+                      ><span
+                        ><strong>检索策略 · rerank-b</strong
+                        ><small>数据集 50 条 · 昨天 18:21</small></span
+                      ><b>88%</b></button
+                    ><button class="row">
+                      <i class="dot bad"></i
+                      ><span
+                        ><strong>工具调用 · v0.9</strong
+                        ><small>数据集 20 条 · 昨天 16:04</small></span
+                      ><b>71%</b>
+                    </button>
+                  </div>
+                </div>
+                <div class="callout">
+                  <div class="callout-mark">!</div>
+                  <div>
+                    <strong>有 3 条失败 Trace 值得先看</strong>
+                    <p>
+                      失败集中在“退货规则”问题，点击 Trace
+                      可以看到检索、模型回答和评估证据。
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+        <article class="direction">
+          <div class="direction-label">
+            <strong>B · Trace 列表</strong><span>扫描状态，快速筛选</span>
+          </div>
+          <div class="screen">
+            <div class="screen-bar">
+              <span class="brand-mark">AE</span><strong>Trace</strong
+              ><small>项目 / 客服知识库 Agent</small>
+            </div>
+            <div class="screen-main">
+              <nav class="screen-nav">
+                <p>观察</p>
+                <button class="nav-link">总览</button
+                ><button class="nav-link active">Trace</button
+                ><button class="nav-link">数据集</button
+                ><button class="nav-link">实验</button>
+                <p class="nav-section-spaced">过滤</p>
+                <button class="nav-link">失败 17</button
+                ><button class="nav-link">慢请求</button>
+              </nav>
+              <div class="screen-content">
+                <div class="screen-title">
+                  <div>
+                    <h2>Trace</h2>
+                    <p>每一条请求都能回到原始证据</p>
+                  </div>
+                  <button class="button">导出</button>
+                </div>
+                <div class="toolbar">
+                  <input
+                    class="input"
+                    aria-label="搜索 Trace"
+                    placeholder="搜索 trace id、输入或标签"
+                  /><button class="filter-chip active">全部</button
+                  ><button class="filter-chip">失败</button
+                  ><button class="filter-chip">慢请求</button>
+                </div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <strong>1,284 条 Trace</strong><span>按最近时间排序</span>
+                  </div>
+                  <div class="rows">
+                    <button class="row">
+                      <i class="dot bad"></i
+                      ><span
+                        ><strong>tr_8f2a · 退货规则是什么？</strong
+                        ><small>3.8s · 4 spans · 2 分钟前</small></span
+                      ><b>失败</b></button
+                    ><button class="row selected">
+                      <i class="dot"></i
+                      ><span
+                        ><strong>tr_7cd1 · 如何修改收货地址？</strong
+                        ><small>1.2s · 5 spans · 6 分钟前</small></span
+                      ><b>通过</b></button
+                    ><button class="row">
+                      <i class="dot warn"></i
+                      ><span
+                        ><strong>tr_6ab4 · 会员积分怎么用？</strong
+                        ><small>6.1s · 6 spans · 11 分钟前</small></span
+                      ><b>慢</b></button
+                    ><button class="row">
+                      <i class="dot"></i
+                      ><span
+                        ><strong>tr_5ed0 · 发票可以补开吗？</strong
+                        ><small>1.0s · 3 spans · 14 分钟前</small></span
+                      ><b>通过</b>
+                    </button>
+                  </div>
+                </div>
+                <div class="legend">
+                  <span><i></i>成功</span><span><i class="bad"></i>失败</span
+                  ><span><i class="focus"></i>当前筛选</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+        <article class="direction">
+          <div class="direction-label">
+            <strong>C · Trace 详情</strong><span>像批改作业一样定位证据</span>
+          </div>
+          <div class="screen">
+            <div class="screen-bar">
+              <span class="brand-mark">AE</span><strong>Trace 详情</strong
+              ><small>tr_8f2a</small>
+            </div>
+            <div class="screen-main single">
+              <div class="screen-content">
+                <div class="screen-title">
+                  <div>
+                    <h2>退货规则是什么？</h2>
+                    <p>失败 Trace · 3.8s · 2026-09-13 10:21</p>
+                  </div>
+                  <span class="stamp">需要复核</span>
+                </div>
+                <div class="tabs">
+                  <button class="tab active">时间线</button
+                  ><button class="tab">输入输出</button
+                  ><button class="tab">评估分数</button>
+                </div>
+                <div class="trace-layout">
+                  <div class="trace-tree">
+                    <div class="tree-line active">● Agent 根节点</div>
+                    <div class="tree-line tree-indent">└ 检索 · 4 个片段</div>
+                    <div class="tree-line tree-indent">
+                      └ LLM · deepseek-chat
+                    </div>
+                    <div class="tree-line tree-indent">
+                      └ 工具 · order_lookup
+                    </div>
+                    <div class="tree-line tree-indent">└ 输出 · 失败</div>
+                  </div>
+                  <div class="trace-detail">
+                    <span class="trace-badge"
+                      >失败原因：回答没有引用命中的规则</span
+                    >
+                    <h3>LLM 输出</h3>
+                    <pre>
+{
+  "answer": "可以在 30 天内退货。",
+  "citations": [],
+  "latency_ms": 1840
+}</pre>
+                    <div class="score-row">
+                      <span>答案相关性</span><b class="down">0.42</b>
+                      <div class="score-bar">
+                        <i class="low score-bar-42"></i>
+                      </div>
+                    </div>
+                    <div class="score-row">
+                      <span>检索充分性</span><b>0.91</b>
+                      <div class="score-bar"><i class="score-bar-91"></i></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="callout callout-spaced">
+                  <div class="callout-mark">→</div>
+                  <div>
+                    <strong>下一步建议</strong>
+                    <p>
+                      检查输出模板是否强制要求引用来源，再用同一数据集重跑对比。
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+      <footer class="prototype-footer">
+        <strong>这套原型的取舍：</strong
+        >三栏不是最终页面同时塞三份内容，而是同一核心工作流的三个页面状态，供你比较视觉语言。确认后再把其中一套落到现有
+        Next.js 工作台。
+      </footer>
+    </main>
+    <script>
+      document.querySelectorAll(".nav-link").forEach(function (button) {
+        button.addEventListener("click", function () {
+          button
+            .closest("nav")
+            .querySelectorAll(".nav-link")
+            .forEach(function (item) {
+              item.classList.remove("active");
+            });
+          button.classList.add("active");
+        });
+      });
+      document
+        .querySelectorAll(".filter-chip, .tab")
+        .forEach(function (button) {
+          button.addEventListener("click", function () {
+            button.parentElement
+              .querySelectorAll(".filter-chip, .tab")
+              .forEach(function (item) {
+                item.classList.remove("active");
+              });
+            button.classList.add("active");
+          });
+        });
+    </script>
+  </body>
+</html>

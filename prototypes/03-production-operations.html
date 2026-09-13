@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Eval 原型 03：生产运营</title>
+    <link rel="stylesheet" href="prototype.css" />
+  </head>
+  <body>
+    <main class="prototype-shell">
+      <header class="prototype-header">
+        <div>
+          <p class="prototype-kicker">Prototype 03 / Operate</p>
+          <h1>从一次失败，回到下一次发布。</h1>
+        </div>
+        <p>
+          运营与扩展原型：把人工标注、接入状态、发布门禁放在同一套视觉系统里。所有状态都能解释，并且为真实
+          Agent 接入留下清晰入口。
+        </p>
+      </header>
+      <div class="reference-note">
+        <span>失败不是红色装饰，是行动入口</span><span>连接状态必须可验证</span
+        ><span>发布结论必须有证据</span>
+      </div>
+      <section class="prototype-grid">
+        <article class="direction">
+          <div class="direction-label">
+            <strong>A · 人工标注队列</strong
+            ><span>参考 Phoenix / Langfuse 的 Annotation</span>
+          </div>
+          <div class="screen">
+            <div class="screen-bar">
+              <span class="brand-mark">AE</span><strong>人工标注</strong
+              ><small>需要人来判断的样本</small>
+            </div>
+            <div class="screen-main">
+              <nav class="screen-nav">
+                <p>质量</p>
+                <button class="nav-link">评估器</button
+                ><button class="nav-link active">人工标注</button
+                ><button class="nav-link">回归</button
+                ><button class="nav-link">发布门禁</button>
+                <p class="nav-section-spaced">接入</p>
+                <button class="nav-link">Agent Release</button
+                ><button class="nav-link">连接设置</button>
+              </nav>
+              <div class="screen-content">
+                <div class="screen-title">
+                  <div>
+                    <h2>待标注队列</h2>
+                    <p>8 条样本 · 按不确定性排序</p>
+                  </div>
+                  <button class="button primary">开始标注</button>
+                </div>
+                <div class="toolbar">
+                  <button class="filter-chip active">待处理 8</button
+                  ><button class="filter-chip">我已处理</button
+                  ><button class="filter-chip">全部</button>
+                </div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <strong>需要你的判断</strong><span>剩余 8 条</span>
+                  </div>
+                  <div class="rows">
+                    <button class="row selected">
+                      <i class="dot bad"></i
+                      ><span
+                        ><strong>case_002 · 退货期限是多久？</strong
+                        ><small>模型评分 0.42 · 来自 exp_01</small></span
+                      ><b>紧急</b></button
+                    ><button class="row">
+                      <i class="dot warn"></i
+                      ><span
+                        ><strong>case_017 · 优惠券能叠加吗？</strong
+                        ><small>模型评分 0.56 · 来自 trace_7ad</small></span
+                      ><b>待审</b></button
+                    ><button class="row">
+                      <i class="dot warn"></i
+                      ><span
+                        ><strong>case_031 · 订单何时发货？</strong
+                        ><small>两个评估器结果冲突</small></span
+                      ><b>待审</b>
+                    </button>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <strong>当前样本</strong><span>case_002</span>
+                  </div>
+                  <div class="content-pad-10">
+                    <p class="sample-question">
+                      问题：退货期限是多久？
+                    </p>
+                    <p class="sample-answer">
+                      回答：可以在 30 天内退货。<br />来源：无引用
+                    </p>
+                    <div class="toolbar">
+                      <button class="button primary">✓ 正确</button
+                      ><button class="button danger">✕ 错误</button
+                      ><button class="button">跳过</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+        <article class="direction">
+          <div class="direction-label">
+            <strong>B · Agent 接入</strong
+            ><span>参考 Phoenix OTLP / SDK 的真实接入思路</span>
+          </div>
+          <div class="screen">
+            <div class="screen-bar">
+              <span class="brand-mark">AE</span><strong>Agent Release</strong
+              ><small>真实运行，不代替你的 Agent</small>
+            </div>
+            <div class="screen-main single">
+              <div class="screen-content">
+                <div class="screen-title">
+                  <div>
+                    <h2>客服 Agent · release-1.8</h2>
+                    <p>SDK 上报 Trace · 最近心跳 6 分钟前</p>
+                  </div>
+                  <span class="stamp connected">已连接</span>
+                </div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <strong>接入方式</strong><span>选择一种即可</span>
+                  </div>
+                  <div class="content-stack-8 content-pad-10">
+                    <div class="callout">
+                      <div class="callout-mark">SDK</div>
+                      <div>
+                        <strong>Python SDK</strong>
+                        <p>
+                          在 Agent
+                          进程中初始化客户端，记录输入、输出、工具和检索 span。
+                        </p>
+                      </div>
+                    </div>
+                    <div class="callout">
+                      <div class="callout-mark">OTel</div>
+                      <div>
+                        <strong>OpenTelemetry / HTTP</strong>
+                        <p>
+                          已有 OTel 链路时，直接把 Trace 发到平台的接收端点。
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <strong>最近上报</strong><span>可验证连接是否真的工作</span>
+                  </div>
+                  <div class="rows">
+                    <div class="row">
+                      <i class="dot"></i
+                      ><span
+                        ><strong>tr_7cd1 · 如何修改收货地址？</strong
+                        ><small>5 spans · 1.2s · 6 分钟前</small></span
+                      ><b>已接收</b>
+                    </div>
+                    <div class="row">
+                      <i class="dot"></i
+                      ><span
+                        ><strong>tr_6ab4 · 会员积分怎么用？</strong
+                        ><small>6 spans · 6.1s · 11 分钟前</small></span
+                      ><b>已接收</b>
+                    </div>
+                  </div>
+                </div>
+                <div class="status-line">
+                  ✓ API Key 已配置 · 最近一次请求返回 202 · Trace 可在列表中查询
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+        <article class="direction">
+          <div class="direction-label">
+            <strong>C · 发布门禁</strong
+            ><span>参考实验对比后的 release decision</span>
+          </div>
+          <div class="screen">
+            <div class="screen-bar">
+              <span class="brand-mark">AE</span><strong>发布门禁</strong
+              ><small>release-1.8 → production</small>
+            </div>
+            <div class="screen-main single">
+              <div class="screen-content">
+                <div class="screen-title">
+                  <div>
+                    <h2>发布前检查</h2>
+                    <p>用规则把“感觉变好了”变成明确结论</p>
+                  </div>
+                  <span class="stamp">可以发布</span>
+                </div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <strong>门禁规则</strong><span>3 条规则</span>
+                  </div>
+                  <div class="rows">
+                    <div class="row">
+                      <i class="dot"></i
+                      ><span
+                        ><strong>答案相关性 ≥ 0.90</strong
+                        ><small>本次 0.93 · 基线 0.88</small></span
+                      ><b class="up">通过</b>
+                    </div>
+                    <div class="row">
+                      <i class="dot"></i
+                      ><span
+                        ><strong>引用完整性 ≥ 0.92</strong
+                        ><small>本次 0.96 · 基线 0.91</small></span
+                      ><b class="up">通过</b>
+                    </div>
+                    <div class="row">
+                      <i class="dot bad"></i
+                      ><span
+                        ><strong>平均延迟 ≤ 1.2s</strong
+                        ><small>本次 1.4s · 超出 0.2s</small></span
+                      ><b class="down">告警</b>
+                    </div>
+                  </div>
+                </div>
+                <div class="status-line bad">
+                  ! 软门槛告警：延迟上升 27%，需要负责人确认后继续
+                </div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <strong>证据</strong><span>可追溯到实验结果</span>
+                  </div>
+                  <div class="content-pad-10">
+                    <div class="compare">
+                      <div>
+                        <h3>本次运行</h3>
+                        <p>exp_20260913_01<br />50 条用例 · 94% 通过</p>
+                      </div>
+                      <div>
+                        <h3>基线运行</h3>
+                        <p>exp_20260910_03<br />50 条用例 · 91% 通过</p>
+                      </div>
+                    </div>
+                    <div class="toolbar toolbar-spaced">
+                      <button class="button">查看实验</button
+                      ><button class="button">查看退化用例</button
+                      ><button class="button primary">确认并发布</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+      <footer class="prototype-footer">
+        <strong>这套原型的取舍：</strong
+        >扩展功能不另起一套“运营后台”，而是沿着真实 Trace → 标注 → 回归 →
+        发布的证据链展开；连接页只描述如何接入和验证，不替用户运行一个虚假的
+        Agent。
+      </footer>
+    </main>
+    <script>
+      document.querySelectorAll(".nav-link").forEach(function (button) {
+        button.addEventListener("click", function () {
+          button
+            .closest("nav")
+            .querySelectorAll(".nav-link")
+            .forEach(function (item) {
+              item.classList.remove("active");
+            });
+          button.classList.add("active");
+        });
+      });
+      document
+        .querySelectorAll(".filter-chip, .tab")
+        .forEach(function (button) {
+          button.addEventListener("click", function () {
+            button.parentElement
+              .querySelectorAll(".filter-chip, .tab")
+              .forEach(function (item) {
+                item.classList.remove("active");
+              });
+            button.classList.add("active");
+          });
+        });
+    </script>
+  </body>
+</html>

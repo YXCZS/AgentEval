@@ -139,8 +139,9 @@ test("Provider lifecycle and managed Judge binding keep the browser free of Prov
 
   await page.getByRole("button", { name: "停用", exact: true }).click();
   await page.getByRole("button", { name: "启用", exact: true }).click();
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "删除 Disposable Judge", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "删除 Provider？" })).toBeVisible();
+  await page.getByRole("button", { name: "确认删除", exact: true }).click();
   await expect(page.getByText("Disposable Judge", { exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: "添加 Provider", exact: true }).click();
