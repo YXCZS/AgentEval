@@ -49,6 +49,7 @@ from agent_eval_api.db import (
     ProjectRecord,
     new_id,
 )
+from agent_eval_api.settings import Settings, get_settings
 from agent_eval_api.traces import get_project_trace, trace_response
 
 router = APIRouter(prefix="/projects/{project_id}/datasets", tags=["datasets"])
@@ -110,6 +111,8 @@ def case_record(version_id: str, case: DatasetCase) -> DatasetCaseRecord:
         messages=[message.model_dump(mode="json") for message in case.messages],
         metadata_json=case.metadata,
         source_trace_id=case.source_trace_id,
+        source_span_ids=case.source_span_ids,
+        source_mapping=case.source_mapping,
     )
 
 
@@ -129,6 +132,8 @@ def case_response(case: DatasetCaseRecord) -> DatasetCase:
         messages=[ChatMessage.model_validate(message) for message in case.messages],
         metadata=case.metadata_json,
         source_trace_id=case.source_trace_id,
+        source_span_ids=case.source_span_ids,
+        source_mapping=case.source_mapping,
     )
 
 
@@ -536,6 +541,29 @@ def update_case(
     return version_response(create_version(db, dataset, cases, version.metadata_json))
 
 
+@router.delete(
+    "/{dataset_id}/versions/{version_id}/cases/{case_id}",
+    response_model=DatasetVersion,
+    status_code=status.HTTP_201_CREATED,
+)
+def archive_case(
+    project_id: str,
+    dataset_id: str,
+    version_id: str,
+    case_id: str,
+    db: Session = Depends(get_db),  # noqa: B008
+    _: AuthContext = Depends(require_project_access),  # noqa: B008
+) -> DatasetVersion:
+    """Archive a Case by creating a new Dataset Version without mutating history."""
+    version = get_version(db, project_id, dataset_id, version_id)
+    cases = [case_response(case) for case in version.cases]
+    remaining = [case for case in cases if case.id != case_id]
+    if len(remaining) == len(cases):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="dataset case not found")
+    dataset = get_dataset(db, project_id, dataset_id)
+    return version_response(create_version(db, dataset, remaining, version.metadata_json))
+
+
 def select_trace_value(trace: Trace, selection: TraceFieldSelection) -> Any:
     span = next((item for item in trace.spans if item.span_id == selection.span_id), None)
     if span is None:
@@ -559,12 +587,39 @@ def select_trace_value(trace: Trace, selection: TraceFieldSelection) -> Any:
 
 
 def default_trace_value(trace: Trace, field: str) -> Any:
+    value = optional_default_trace_value(trace, field)
+    if value is not None:
+        return value
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=f"trace has no usable {field}",
+    )
+
+
+def optional_default_trace_value(trace: Trace, field: str) -> Any | None:
     for span in trace.spans:
         if span.kind.value == "agent" and getattr(span, field) is not None:
             return getattr(span, field)
     for span in trace.spans:
         if getattr(span, field) is not None:
             return getattr(span, field)
+    return None
+
+
+def optional_default_trace_span_id(trace: Trace, field: str) -> str | None:
+    for span in trace.spans:
+        if span.kind.value == "agent" and getattr(span, field) is not None:
+            return span.span_id
+    for span in trace.spans:
+        if getattr(span, field) is not None:
+            return span.span_id
+    return None
+
+
+def default_trace_span_id(trace: Trace, field: str) -> str:
+    span_id = optional_default_trace_span_id(trace, field)
+    if span_id is not None:
+        return span_id
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         detail=f"trace has no usable {field}",
@@ -614,6 +669,7 @@ def create_case_from_trace(
     version_id: str,
     payload: TraceToDatasetCaseRequest,
     db: Session = Depends(get_db),  # noqa: B008
+    settings: Settings = Depends(get_settings),  # noqa: B008
     _: AuthContext = Depends(require_project_access),  # noqa: B008
 ) -> DatasetVersion:
     version = get_version(db, project_id, dataset_id, version_id)
@@ -621,7 +677,7 @@ def create_case_from_trace(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="dataset case already exists"
         )
-    trace = trace_response(get_project_trace(db, project_id, payload.trace_id))
+    trace = trace_response(get_project_trace(db, project_id, payload.trace_id), settings)
     input_value = (
         select_trace_value(trace, payload.input)
         if payload.input is not None
@@ -630,7 +686,7 @@ def create_case_from_trace(
     expected_output = (
         select_trace_value(trace, payload.expected_output)
         if payload.expected_output is not None
-        else default_trace_value(trace, "output")
+        else optional_default_trace_value(trace, "output")
     )
     expected_state = (
         select_trace_value(trace, payload.expected_state)
@@ -642,7 +698,47 @@ def create_case_from_trace(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="selected expected state must be an object",
         )
+    mapped_metadata = dict(payload.metadata)
+    for key, selection in payload.metadata_mapping.items():
+        mapped_metadata[key] = select_trace_value(trace, selection)
     cases = [case_response(case) for case in version.cases]
+    source_span_ids = list(
+        dict.fromkeys(
+            span_id
+            for span_id in [
+                payload.input.span_id
+                if payload.input is not None
+                else default_trace_span_id(trace, "input"),
+                payload.expected_output.span_id
+                if payload.expected_output is not None
+                else optional_default_trace_span_id(trace, "output"),
+                payload.expected_state.span_id if payload.expected_state else None,
+            ]
+            + (
+                payload.tool_span_ids
+                if payload.tool_span_ids is not None
+                else [span.span_id for span in trace.spans if span.kind.value == "tool"]
+            )
+            + [selection.span_id for selection in payload.metadata_mapping.values()]
+            if span_id is not None
+        )
+    )
+    source_mapping = {
+        "input": payload.input.model_dump(mode="json") if payload.input else None,
+        "expected_output": (
+            payload.expected_output.model_dump(mode="json")
+            if payload.expected_output
+            else None
+        ),
+        "expected_state": (
+            payload.expected_state.model_dump(mode="json") if payload.expected_state else None
+        ),
+        "tool_span_ids": payload.tool_span_ids,
+        "metadata_mapping": {
+            key: selection.model_dump(mode="json")
+            for key, selection in payload.metadata_mapping.items()
+        },
+    }
     cases.append(
         DatasetCase(
             id=payload.id,
@@ -650,8 +746,10 @@ def create_case_from_trace(
             expected_output=expected_output,
             expected_tools=trace_tool_calls(trace, payload.tool_span_ids),
             expected_state=expected_state,
-            metadata={**payload.metadata, "source": "trace"},
+            metadata={**mapped_metadata, "source": "trace"},
             source_trace_id=trace.trace_id,
+            source_span_ids=source_span_ids,
+            source_mapping=source_mapping,
         )
     )
     dataset = get_dataset(db, project_id, dataset_id)

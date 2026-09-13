@@ -48,13 +48,13 @@ def upgrade() -> None:
     sa.UniqueConstraint('dataset_id', 'version', name='uq_dataset_versions_dataset_version')
     )
     op.create_index('ix_dataset_versions_dataset_created', 'dataset_versions', ['dataset_id', 'created_at'], unique=False)
-    op.create_foreign_key(
-        'fk_datasets_current_version_id',
-        'datasets',
-        'dataset_versions',
-        ['current_version_id'],
-        ['id'],
-    )
+    with op.batch_alter_table('datasets') as batch_op:
+        batch_op.create_foreign_key(
+            'fk_datasets_current_version_id',
+            'dataset_versions',
+            ['current_version_id'],
+            ['id'],
+        )
     op.create_table('agents',
     sa.Column('id', sa.String(length=128), nullable=False),
     sa.Column('project_id', sa.String(length=128), nullable=False),

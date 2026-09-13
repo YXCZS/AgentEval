@@ -47,6 +47,8 @@ JSON_FIELDS = {
     "retrieval_context",
     "messages",
     "metadata",
+    "source_span_ids",
+    "source_mapping",
 }
 
 

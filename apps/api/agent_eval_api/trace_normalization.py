@@ -9,8 +9,21 @@ from uuid import uuid4
 
 from agent_eval_api.contracts import ExecutionStatus, Trace, TraceSpan, TraceSpanKind
 
-_TRACE_FIELDS = {"trace_id", "traceId", "id", "run_id", "case_id", "status", "source", "spans"}
+_TRACE_FIELDS = {
+    "trace_id",
+    "traceId",
+    "id",
+    "run_id",
+    "case_id",
+    "status",
+    "source",
+    "spans",
+    "resourceSpans",
+    "extensions",
+}
 _SPAN_FIELDS = {
+    "trace_id",
+    "traceId",
     "span_id",
     "spanId",
     "id",
@@ -25,9 +38,12 @@ _SPAN_FIELDS = {
     "end_time",
     "ended_at",
     "endTimeUnixNano",
+    "kind",
     "input",
     "output",
     "error",
+    "usage",
+    "cost",
     "attributes",
     "extensions",
 }
@@ -41,9 +57,18 @@ def normalize_trace_payload(payload: dict[str, Any], *, source: str) -> Trace:
         payload.get("trace_id") or payload.get("traceId") or payload.get("id")
     )
     if trace_id is None and raw_spans:
-        trace_id = _string_or_none(raw_spans[0].get("trace_id") or raw_spans[0].get("traceId"))
+        first_span = raw_spans[0][0]
+        trace_id = _string_or_none(first_span.get("trace_id") or first_span.get("traceId"))
     trace_id = trace_id or str(uuid4())
-    spans = [_normalize_span(raw_span, trace_id) for raw_span in raw_spans]
+    spans = [_normalize_span(raw_span, trace_id, inherited) for raw_span, inherited in raw_spans]
+    extensions = (
+        dict(payload["extensions"])
+        if isinstance(payload.get("extensions"), dict)
+        else {}
+    )
+    extensions.update(
+        {key: value for key, value in payload.items() if key not in _TRACE_FIELDS}
+    )
     return Trace(
         trace_id=trace_id,
         run_id=_string_or_none(payload.get("run_id")),
@@ -51,38 +76,53 @@ def normalize_trace_payload(payload: dict[str, Any], *, source: str) -> Trace:
         status=_execution_status(payload.get("status")),
         spans=spans,
         source=source,
-        extensions={key: value for key, value in payload.items() if key not in _TRACE_FIELDS},
+        extensions=extensions,
     )
 
 
-def _collect_spans(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _collect_spans(payload: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     direct_spans = payload.get("spans")
     if isinstance(direct_spans, list):
-        return [span for span in direct_spans if isinstance(span, dict)]
+        return [(span, {}) for span in direct_spans if isinstance(span, dict)]
 
-    spans: list[dict[str, Any]] = []
+    spans: list[tuple[dict[str, Any], dict[str, Any]]] = []
     resource_spans = payload.get("resourceSpans")
     if not isinstance(resource_spans, list):
         return spans
     for resource_span in resource_spans:
         if not isinstance(resource_span, dict):
             continue
-        resource_attributes = _attributes(resource_span.get("resource", {}).get("attributes"))
+        resource = resource_span.get("resource")
+        resource = resource if isinstance(resource, dict) else {}
+        resource_attributes = _attributes(resource.get("attributes"))
+        resource_extensions = _unknown_fields(resource, {"attributes"})
         for scope_span in resource_span.get("scopeSpans", []):
             if not isinstance(scope_span, dict):
                 continue
+            inherited_extensions: dict[str, Any] = {}
+            if resource_extensions:
+                inherited_extensions["otlp.resource"] = resource_extensions
+            scope_extensions = _unknown_fields(scope_span, {"spans"})
+            if scope_extensions:
+                inherited_extensions["otlp.scope"] = scope_extensions
             for span in scope_span.get("spans", []):
                 if not isinstance(span, dict):
                     continue
                 span_copy = dict(span)
                 span_copy["attributes"] = resource_attributes | _attributes(span.get("attributes"))
-                spans.append(span_copy)
+                spans.append((span_copy, inherited_extensions))
     return spans
 
 
-def _normalize_span(raw: dict[str, Any], trace_id: str) -> TraceSpan:
+def _normalize_span(
+    raw: dict[str, Any], trace_id: str, inherited_extensions: dict[str, Any] | None = None
+) -> TraceSpan:
     attributes = _attributes(raw.get("attributes"))
     kind = _span_kind(attributes, raw.get("kind"))
+    extensions = dict(inherited_extensions or {})
+    if isinstance(raw.get("extensions"), dict):
+        extensions.update(raw["extensions"])
+    extensions.update({key: value for key, value in raw.items() if key not in _SPAN_FIELDS})
     return TraceSpan(
         span_id=_string_or_none(raw.get("span_id") or raw.get("spanId") or raw.get("id"))
         or str(uuid4()),
@@ -99,15 +139,25 @@ def _normalize_span(raw: dict[str, Any], trace_id: str) -> TraceSpan:
         ended_at=_optional_timestamp(
             raw.get("ended_at") or raw.get("end_time") or raw.get("endTimeUnixNano")
         ),
-        input=raw.get(
-            "input", _semantic_value(attributes, "input.value", "gen_ai.input.messages")
+        input=_field_or_semantic(
+        raw, "input", attributes, "input.value", "gen_ai.input.messages", "llm.input_messages"
+            , "tool.call.arguments", "tool.parameters"
         ),
-        output=raw.get(
-            "output", _semantic_value(attributes, "output.value", "gen_ai.output.messages")
+        output=_field_or_semantic(
+            raw,
+            "output",
+            attributes,
+            "output.value",
+            "gen_ai.output.messages",
+            "llm.output_messages",
+            "tool.call.result",
+            "tool.result",
         ),
         error=_error(raw.get("error"), attributes, raw.get("status")),
+        usage=_usage(raw.get("usage"), attributes),
+        cost=_cost(raw.get("cost"), attributes),
         attributes=attributes,
-        extensions={key: value for key, value in raw.items() if key not in _SPAN_FIELDS},
+        extensions=extensions,
     )
 
 
@@ -127,15 +177,25 @@ def _attributes(raw: Any) -> dict[str, Any]:
 def _otlp_value(value: Any) -> Any:
     if not isinstance(value, dict):
         return value
-    for key in ("stringValue", "intValue", "doubleValue", "boolValue", "bytesValue"):
+    for key in ("stringValue", "doubleValue", "boolValue", "bytesValue"):
         if key in value:
             return value[key]
+    if "intValue" in value:
+        integer = value["intValue"]
+        try:
+            return int(integer)
+        except (TypeError, ValueError):
+            return integer
     if "arrayValue" in value and isinstance(value["arrayValue"], dict):
         values = value["arrayValue"].get("values", [])
         return [_otlp_value(item) for item in values] if isinstance(values, list) else []
     if "kvlistValue" in value and isinstance(value["kvlistValue"], dict):
         return _attributes(value["kvlistValue"].get("values"))
     return value
+
+
+def _unknown_fields(value: dict[str, Any], known: set[str]) -> dict[str, Any]:
+    return {key: item for key, item in value.items() if key not in known}
 
 
 def _span_kind(attributes: dict[str, Any], raw_kind: Any) -> TraceSpanKind:
@@ -150,16 +210,18 @@ def _span_kind(attributes: dict[str, Any], raw_kind: Any) -> TraceSpanKind:
         return TraceSpanKind.TOOL
     if candidate in {"tool_result", "toolresult"}:
         return TraceSpanKind.TOOL_RESULT
-    if candidate in {"retriever", "retrieval", "reranker"}:
+    if candidate in {"retriever", "retrieval", "reranker", "embedder"}:
         return TraceSpanKind.RETRIEVAL
     if candidate == "guardrail":
         return TraceSpanKind.GUARDRAIL
     if candidate == "evaluator":
         return TraceSpanKind.EVALUATOR
     operation = str(attributes.get("gen_ai.operation.name", "")).lower()
+    if any(token in operation for token in ("agent", "workflow")):
+        return TraceSpanKind.AGENT
     if "tool" in operation:
         return TraceSpanKind.TOOL
-    if "retriev" in operation:
+    if "retriev" in operation or "rerank" in operation or "embed" in operation:
         return TraceSpanKind.RETRIEVAL
     if operation or any(key.startswith("gen_ai.") for key in attributes):
         return TraceSpanKind.LLM
@@ -171,6 +233,48 @@ def _semantic_value(attributes: dict[str, Any], *keys: str) -> Any:
         if key in attributes:
             return _maybe_parse_json(attributes[key])
     return None
+
+
+def _field_or_semantic(
+    raw: dict[str, Any], field: str, attributes: dict[str, Any], *keys: str
+) -> Any:
+    value = raw.get(field)
+    return value if value is not None else _semantic_value(attributes, *keys)
+
+
+def _usage(raw_usage: Any, attributes: dict[str, Any]) -> dict[str, Any]:
+    usage = dict(raw_usage) if isinstance(raw_usage, dict) else {}
+    aliases = {
+        "input_tokens": (
+            "gen_ai.usage.input_tokens",
+            "gen_ai.usage.prompt_tokens",
+            "llm.token_count.prompt",
+        ),
+        "output_tokens": (
+            "gen_ai.usage.output_tokens",
+            "gen_ai.usage.completion_tokens",
+            "llm.token_count.completion",
+        ),
+        "total_tokens": ("gen_ai.usage.total_tokens", "llm.token_count.total"),
+    }
+    for normalized_key, keys in aliases.items():
+        if normalized_key not in usage:
+            value = _semantic_value(attributes, *keys)
+            if value is not None:
+                usage[normalized_key] = value
+    return usage
+
+
+def _cost(raw_cost: Any, attributes: dict[str, Any]) -> Any:
+    if raw_cost is not None:
+        return raw_cost
+    return _semantic_value(
+        attributes,
+        "gen_ai.usage.cost",
+        "gen_ai.response.cost",
+        "llm.cost",
+        "cost.total",
+    )
 
 
 def _maybe_parse_json(value: Any) -> Any:
@@ -189,7 +293,17 @@ def _error(raw_error: Any, attributes: dict[str, Any], raw_status: Any) -> dict[
         return None
     message = attributes.get("error.message") or attributes.get("exception.message")
     error_type = attributes.get("error.type") or attributes.get("exception.type")
-    return {key: value for key, value in {"message": message, "type": error_type}.items() if value}
+    status_message = raw_status.get("message") if isinstance(raw_status, dict) else None
+    stacktrace = attributes.get("exception.stacktrace")
+    return {
+        key: value
+        for key, value in {
+            "message": message or status_message,
+            "type": error_type,
+            "stacktrace": stacktrace,
+        }.items()
+        if value
+    }
 
 
 def _execution_status(raw: Any) -> ExecutionStatus:

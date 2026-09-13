@@ -18,9 +18,11 @@ from agent_eval_api.contracts import (
     EvaluationReportCase,
     EvaluationReportSummary,
     ExecutionStatus,
+    ExternalScoreProvenance,
     RunStatus,
     Score,
     ScoreDirection,
+    ScoreSource,
     ScoreStatus,
 )
 from agent_eval_api.db import (
@@ -39,8 +41,13 @@ def _score(record: ScoreRecord) -> Score:
         id=record.id,
         run_id=record.run_id,
         case_id=record.case_id,
+        experiment_item_id=record.experiment_item_id,
+        repetition=record.repetition,
+        attempt=record.attempt,
         evaluator_version_id=record.evaluator_version_id,
         trace_id=record.trace_id,
+        span_id=record.span_id,
+        source=ScoreSource(record.source),
         metric_name=record.metric_name,
         status=ScoreStatus(record.status),
         value=record.value,
@@ -50,8 +57,14 @@ def _score(record: ScoreRecord) -> Score:
         evidence=record.evidence,
         rubric=record.rubric,
         judge_model=record.judge_model,
+        provenance=(
+            ExternalScoreProvenance.model_validate(record.provenance)
+            if record.provenance is not None
+            else None
+        ),
         threshold=record.threshold,
         direction=ScoreDirection(record.direction),
+        raw_response=record.raw_response,
         raw_result=record.raw_result,
     )
 
@@ -206,7 +219,8 @@ def read_report(
     scores = db.scalars(score_statement).all() if case_ids else []
     scores_by_case: dict[str, list[ScoreRecord]] = defaultdict(list)
     for score in scores:
-        scores_by_case[score.case_id].append(score)
+        if score.case_id is not None:
+            scores_by_case[score.case_id].append(score)
     filters = {
         key: value
         for key, value in {

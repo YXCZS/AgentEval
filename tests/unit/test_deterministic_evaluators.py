@@ -12,6 +12,9 @@ from agent_eval_api.contracts import (
     ExpectedToolCall,
     ScoreDirection,
     ScoreStatus,
+    Trace,
+    TraceSpan,
+    TraceSpanKind,
 )
 from agent_eval_api.evaluation import (
     EvaluationContext,
@@ -28,6 +31,7 @@ def context(
     config: dict[str, object] | None = None,
     threshold: float | None = 1.0,
     direction: ScoreDirection = ScoreDirection.HIGHER_IS_BETTER,
+    trace: Trace | None = None,
 ) -> EvaluationContext:
     evaluator = EvaluatorVersion(
         id=f"evaluator-{name}",
@@ -51,6 +55,7 @@ def context(
             status=ExecutionStatus.COMPLETED,
         ),
         evaluator=evaluator,
+        trace=trace,
     )
 
 
@@ -197,6 +202,167 @@ def test_json_schema_returns_validation_paths_as_evidence() -> None:
     assert outcome.status is ScoreStatus.FAILED
     assert outcome.evidence[0]["instance_path"] == ["answer"]
     assert "not of type 'string'" in outcome.evidence[0]["message"]
+
+
+def test_context_recall_reads_canonical_retrieval_span() -> None:
+    case = DatasetCase(
+        id="case-1",
+        input="When will order 42 arrive?",
+        retrieval_context=[
+            {"document_id": "shipping", "content": "Orders arrive in two days."},
+            {"content": "Tracking is available after shipment."},
+        ],
+    )
+    trace = Trace(
+        trace_id="trace-1",
+        status=ExecutionStatus.COMPLETED,
+        spans=[
+            TraceSpan(
+                span_id="retrieval-1",
+                trace_id="trace-1",
+                kind=TraceSpanKind.RETRIEVAL,
+                name="retrieve_policy",
+                status=ExecutionStatus.COMPLETED,
+                started_at=datetime.now(UTC),
+                output={
+                    "documents": [
+                        {"document_id": "shipping", "content": "Orders arrive in two days."},
+                        {"content": "Tracking is available after shipment."},
+                    ]
+                },
+            )
+        ],
+    )
+
+    outcome = evaluate_deterministic(
+        context("context_recall", case=case, trace=trace)
+    )[0]
+
+    assert outcome.status is ScoreStatus.PASSED
+    assert outcome.value == 1
+    assert outcome.evidence[0]["actual_count"] == 2
+
+
+def test_context_recall_can_read_external_agent_retrieval_context() -> None:
+    case = DatasetCase(
+        id="case-1",
+        input="test",
+        retrieval_context=[{"document_id": "refund", "content": "Refund policy"}],
+    )
+    trace = Trace(
+        trace_id="trace-1",
+        status=ExecutionStatus.COMPLETED,
+        extensions={
+            "agent_eval.external_trace": {
+                "retrieval_context": [{"document_id": "refund", "content": "Refund policy"}]
+            }
+        },
+    )
+
+    outcome = evaluate_deterministic(context("retrieval_context", case=case, trace=trace))[0]
+
+    assert outcome.status is ScoreStatus.PASSED
+    assert outcome.value == 1
+
+
+def test_citation_accuracy_reports_precision_recall_and_extra_citations() -> None:
+    case = DatasetCase(
+        id="case-1",
+        input="test",
+        retrieval_context=[
+            {"document_id": "refund", "content": "Refund policy"},
+            {"document_id": "shipping", "content": "Shipping policy"},
+        ],
+    )
+    execution = CaseExecution(
+        id="execution-1",
+        run_id="run-1",
+        case_id="case-1",
+        status=ExecutionStatus.COMPLETED,
+        output={"answer": "...", "citations": ["refund", "unknown"]},
+    )
+
+    outcome = evaluate_deterministic(
+        context("citation_accuracy", case=case, execution=execution)
+    )[0]
+
+    assert outcome.status is ScoreStatus.FAILED
+    assert outcome.value == pytest.approx(0.5)
+    assert outcome.evidence[0]["precision"] == pytest.approx(0.5)
+    assert outcome.evidence[0]["recall"] == pytest.approx(0.5)
+
+
+def test_output_format_checks_type_required_fields_and_pattern() -> None:
+    case = DatasetCase(id="case-1", input="test")
+    execution = CaseExecution(
+        id="execution-1",
+        run_id="run-1",
+        case_id="case-1",
+        status=ExecutionStatus.COMPLETED,
+        output={"answer": "ok"},
+    )
+
+    passed = evaluate_deterministic(
+        context(
+            "output_format",
+            case=case,
+            execution=execution,
+            config={"format": "object", "required_fields": ["answer"]},
+        )
+    )[0]
+    failed = evaluate_deterministic(
+        context(
+            "output_format",
+            case=case,
+            execution=execution,
+            config={"format": "string", "pattern": "^ok$"},
+        )
+    )[0]
+
+    assert passed.status is ScoreStatus.PASSED
+    assert failed.status is ScoreStatus.FAILED
+    assert failed.evidence[0]["actual_type"] == "dict"
+
+
+def test_error_rate_is_lower_when_execution_and_trace_are_clean() -> None:
+    started_at = datetime.now(UTC)
+    clean = CaseExecution(
+        id="execution-1",
+        run_id="run-1",
+        case_id="case-1",
+        status=ExecutionStatus.COMPLETED,
+        started_at=started_at,
+        finished_at=started_at,
+    )
+    failed = clean.model_copy(
+        update={
+            "status": ExecutionStatus.FAILED,
+            "error_type": "timeout",
+            "error_message": "agent timed out",
+        }
+    )
+
+    clean_outcome = evaluate_deterministic(
+        context(
+            "error_rate",
+            execution=clean,
+            threshold=0,
+            direction=ScoreDirection.LOWER_IS_BETTER,
+        )
+    )[0]
+    failed_outcome = evaluate_deterministic(
+        context(
+            "error_rate",
+            execution=failed,
+            threshold=0,
+            direction=ScoreDirection.LOWER_IS_BETTER,
+        )
+    )[0]
+
+    assert clean_outcome.status is ScoreStatus.PASSED
+    assert clean_outcome.value == 0
+    assert failed_outcome.status is ScoreStatus.FAILED
+    assert failed_outcome.value == 1
 
 
 def test_latency_and_cost_use_lower_is_better_thresholds() -> None:

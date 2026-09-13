@@ -1,0 +1,91 @@
+{
+  "project": {
+    "id": "project-1",
+    "name": "Legacy local project"
+  },
+  "api_key": {
+    "id": "legacy-api-key-1",
+    "name": "legacy ingest key",
+    "key_hash": "fixture-only-hash-not-a-secret",
+    "key_prefix": "aek_project-1_",
+    "active": true
+  },
+  "agent": {
+    "id": "legacy-prompt-agent-1",
+    "name": "Legacy support agent",
+    "agent_type": "prompt",
+    "description": "Legacy managed prompt record used only for migration rehearsal",
+    "active": true
+  },
+  "agent_version": {
+    "id": "legacy-prompt-agent-v1",
+    "version": 1,
+    "label": "legacy-prompt-v1",
+    "agent_type": "prompt",
+    "prompt_config": {
+      "provider": "OpenAI-compatible",
+      "model": "fixture-model",
+      "endpoint": "https://fixture.invalid/v1/chat/completions",
+      "system_prompt": "Use the supplied order details.",
+      "user_template": "Find order {{order_id}}.",
+      "variable_names": ["order_id"],
+      "temperature": 0.0
+    },
+    "enabled": true
+  },
+  "dataset": {
+    "id": "legacy-dataset-1",
+    "name": "legacy-orders",
+    "description": "Existing regression data",
+    "tags": ["legacy", "orders"]
+  },
+  "dataset_version": {
+    "id": "legacy-dataset-v1",
+    "version": 1,
+    "metadata": {
+      "source": "legacy-fixture"
+    }
+  },
+  "dataset_case": {
+    "id": "legacy-case-1",
+    "case_key": "order-42",
+    "input": {
+      "order_id": "42"
+    },
+    "variables": {
+      "order_id": "42"
+    },
+    "expected_output": {
+      "status": "cancelled"
+    },
+    "criteria": ["returns order status"],
+    "metadata": {
+      "critical": true
+    }
+  },
+  "evaluator": {
+    "id": "legacy-evaluator-v1",
+    "name": "legacy_task_success",
+    "version": "1.0.0",
+    "evaluator_type": "deterministic",
+    "requires": ["output"],
+    "supported_agent_types": ["prompt"],
+    "direction": "maximize",
+    "config": {},
+    "enabled": true
+  },
+  "run": {
+    "id": "legacy-run-1",
+    "status": "completed",
+    "configuration_snapshot": {
+      "agent_type": "prompt",
+      "prompt_config": {
+        "model": "fixture-model"
+      },
+      "dataset_version": "legacy-dataset-v1"
+    },
+    "total_cases": 1,
+    "completed_cases": 1,
+    "failed_cases": 0
+  }
+}

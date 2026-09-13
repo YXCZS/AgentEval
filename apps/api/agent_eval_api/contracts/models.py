@@ -1,17 +1,17 @@
 """Pydantic contracts for the evaluation workbench.
 
-The models intentionally keep domain payloads as JSON objects.  This lets the
-platform support prompt, RAG, tool and custom agents without flattening their
-different inputs into unrelated APIs.
+The models intentionally keep domain payloads as JSON objects. This lets the
+platform support RAG, tool and custom agents without flattening their different
+inputs into unrelated APIs.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, model_validator
 
 JsonValue = dict[str, Any] | list[Any] | str | int | float | bool | None
 JsonObject = dict[str, Any]
@@ -24,10 +24,27 @@ class ContractModel(BaseModel):
 
 
 class AgentType(StrEnum):
-    PROMPT = "prompt"
     RAG = "rag"
     TOOL = "tool"
     CUSTOM = "custom"
+
+
+class ExperimentExecutionMode(StrEnum):
+    """Where a real Agent execution is controlled."""
+
+    SDK_TASK = "sdk_task"
+    OTEL = "otel"
+    REMOTE_UPLOAD = "remote_upload"
+    REMOTE_TRIGGER = "remote_trigger"
+
+
+class EvidencePolicy(StrEnum):
+    """Minimum server-verified evidence required for an Experiment Item."""
+
+    TRACE_REQUIRED = "trace_required"
+    LLM_REQUIRED = "llm_required"
+    TOOL_TRAJECTORY_REQUIRED = "tool_trajectory_required"
+    RAG_TRAJECTORY_REQUIRED = "rag_trajectory_required"
 
 
 class EvaluatorType(StrEnum):
@@ -35,6 +52,26 @@ class EvaluatorType(StrEnum):
     LLM_JUDGE = "llm_judge"
     ADAPTER = "adapter"
     HUMAN = "human"
+
+
+class ProviderKind(StrEnum):
+    OPENAI_COMPATIBLE = "openai_compatible"
+
+
+class ProviderConnectionStatus(StrEnum):
+    PENDING_VALIDATION = "pending_validation"
+    ACTIVE = "active"
+    ERROR = "error"
+    DISABLED = "disabled"
+
+
+class JudgeSamplingParameters(ContractModel):
+    """Versioned sampling controls for a platform-managed Judge request."""
+
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    top_p: float = Field(default=1.0, gt=0.0, le=1.0)
+    max_tokens: int = Field(default=1000, ge=1, le=65536)
+    seed: int | None = None
 
 
 class AdapterKind(StrEnum):
@@ -78,6 +115,16 @@ class ScoreStatus(StrEnum):
     NOT_RUN = "not_run"
 
 
+class ScoreSource(StrEnum):
+    """Origin of a score, kept separate so evidence is never silently replaced."""
+
+    AUTOMATED = "automated"
+    DETERMINISTIC = "deterministic"
+    LLM_JUDGE = "llm_judge"
+    HUMAN = "human"
+    ADAPTER = "adapter"
+
+
 class AnnotationStatus(StrEnum):
     PENDING = "pending"
     IN_REVIEW = "in_review"
@@ -95,6 +142,29 @@ class RegressionGateStatus(StrEnum):
     FAILED = "failed"
     INDETERMINATE = "indeterminate"
     INCOMPLETE = "incomplete"
+    PASS = "PASS"
+    WARNING = "WARNING"
+    BLOCK = "BLOCK"
+    RELEASE_INDETERMINATE = "INDETERMINATE"
+    RELEASE_INCOMPLETE = "INCOMPLETE"
+
+
+class GatePolicyOperator(StrEnum):
+    GREATER_THAN_OR_EQUAL = "gte"
+    LESS_THAN_OR_EQUAL = "lte"
+    GREATER_THAN = "gt"
+    LESS_THAN = "lt"
+    EQUAL = "eq"
+
+
+class GatePolicySeverity(StrEnum):
+    BLOCK = "block"
+    WARNING = "warning"
+
+
+class GatePolicyScope(StrEnum):
+    ALL = "all"
+    CRITICAL = "critical"
 
 
 class TraceSpanKind(StrEnum):
@@ -108,78 +178,19 @@ class TraceSpanKind(StrEnum):
     EVALUATOR = "evaluator"
 
 
-class PromptConfig(ContractModel):
-    provider: str = Field(min_length=1, max_length=100)
-    model: str = Field(min_length=1, max_length=200)
-    endpoint: HttpUrl
-    system_prompt: str = ""
-    user_template: str = Field(min_length=1)
-    variable_names: list[str] = Field(default_factory=list)
-    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
-    top_p: float = Field(default=1.0, gt=0.0, le=1.0)
-    max_tokens: int | None = Field(default=None, gt=0)
-    response_format: JsonObject | None = None
-    timeout_seconds: float = Field(default=60.0, gt=0.0, le=300.0)
-    concurrency_limit: int = Field(default=4, gt=0, le=100)
-    rate_limit_per_minute: int | None = Field(default=None, gt=0, le=60_000)
-    max_retries: int = Field(default=2, ge=0, le=5)
-    retry_backoff_seconds: float = Field(default=0.2, ge=0.0, le=30.0)
-    input_cost_per_1k: float | None = Field(default=None, ge=0.0)
-    output_cost_per_1k: float | None = Field(default=None, ge=0.0)
+class AgentRelease(ContractModel):
+    """An immutable execution identity for a user-owned Agent runtime."""
 
-    @model_validator(mode="after")
-    def validate_variables(self) -> PromptConfig:
-        names = set(self.variable_names)
-        if len(names) != len(self.variable_names):
-            raise ValueError("variable_names must not contain duplicates")
-        if any(not name for name in self.variable_names):
-            raise ValueError("variable_names must contain non-empty names")
-        return self
-
-
-class EndpointConfig(ContractModel):
-    url: HttpUrl
-    method: Literal["POST"] = "POST"
-    auth_ref: str | None = Field(default=None, min_length=1, max_length=200)
-    protocol_version: str = Field(default="v1", min_length=1, max_length=50)
-    timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
-    max_response_bytes: int = Field(default=1_048_576, gt=0)
-    max_tool_calls: int = Field(default=32, ge=0)
-    concurrency_limit: int = Field(default=4, gt=0, le=100)
-    rate_limit_per_minute: int | None = Field(default=None, gt=0, le=60_000)
-    max_retries: int = Field(default=2, ge=0, le=5)
-    retry_backoff_seconds: float = Field(default=0.2, ge=0.0, le=30.0)
-
-
-class Agent(ContractModel):
     id: str = Field(min_length=1, max_length=128)
-    name: str = Field(min_length=1, max_length=200)
-    agent_type: AgentType
-    description: str | None = None
-    active: bool = True
-    created_at: datetime
-    updated_at: datetime
-
-
-class AgentVersion(ContractModel):
-    id: str = Field(min_length=1, max_length=128)
-    agent_id: str = Field(min_length=1, max_length=128)
+    project_id: str = Field(min_length=1, max_length=128)
     version: int = Field(gt=0)
     label: str = Field(min_length=1, max_length=100)
     agent_type: AgentType
-    prompt_config: PromptConfig | None = None
-    endpoint_config: EndpointConfig | None = None
+    release_identity: str = Field(min_length=1, max_length=200)
+    source_revision: str | None = Field(default=None, min_length=1, max_length=200)
+    metadata: JsonObject = Field(default_factory=dict)
     enabled: bool = True
     created_at: datetime
-
-    @model_validator(mode="after")
-    def validate_execution_config(self) -> AgentVersion:
-        if self.agent_type is AgentType.PROMPT:
-            if self.prompt_config is None or self.endpoint_config is not None:
-                raise ValueError("prompt agents require prompt_config only")
-        elif self.endpoint_config is None or self.prompt_config is not None:
-            raise ValueError("non-prompt agents require endpoint_config only")
-        return self
 
 
 class ExpectedToolCall(ContractModel):
@@ -192,6 +203,53 @@ class ChatMessage(ContractModel):
     role: Literal["system", "user", "assistant", "tool"]
     content: JsonValue
     name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class ExternalScoreProvenance(ContractModel):
+    """Evidence identifying how an LLM Judge produced a score."""
+
+    source: Literal["external_judge", "platform_provider"] = "external_judge"
+    protocol: Literal[
+        "signed_http_json_v1", "openai_compatible_chat_completions"
+    ] | None = None
+    connection_id: str | None = Field(default=None, min_length=1, max_length=128)
+    evaluator_version: str = Field(min_length=1, max_length=100)
+    model: str | None = Field(default=None, max_length=200)
+    model_release: str | None = Field(default=None, max_length=200)
+    rubric_version: str | None = Field(default=None, max_length=100)
+    prompt_template_version: str | None = Field(default=None, max_length=100)
+    metadata: JsonObject = Field(default_factory=dict)
+
+
+class ExternalJudgeRequest(ContractModel):
+    """Stable JSON request sent to a user-managed external LLM Judge."""
+
+    run_id: str = Field(min_length=1, max_length=128)
+    case_id: str = Field(min_length=1, max_length=128)
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    metric_name: str = Field(min_length=1, max_length=200)
+    evaluator_version: str = Field(min_length=1, max_length=100)
+    rubric: str = Field(min_length=1)
+    input: JsonValue
+    expected_output: JsonValue = None
+    actual_output: JsonValue = None
+    criteria: list[str] = Field(default_factory=list)
+    tool_calls: list[ExpectedToolCall] = Field(default_factory=list)
+    trace: JsonObject | None = None
+    metadata: JsonObject = Field(default_factory=dict)
+
+
+class ExternalJudgeResponse(ContractModel):
+    """Normalized score and provenance returned by an external LLM Judge."""
+
+    score: float
+    passed: bool | None = None
+    label: str | None = None
+    explanation: str = Field(min_length=1)
+    evidence: list[JsonObject] = Field(default_factory=list)
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    provenance: ExternalScoreProvenance
+    extensions: JsonObject = Field(default_factory=dict)
 
 
 class RetrievalContext(ContractModel):
@@ -213,6 +271,8 @@ class DatasetCase(ContractModel):
     messages: list[ChatMessage] = Field(default_factory=list)
     metadata: JsonObject = Field(default_factory=dict)
     source_trace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    source_span_ids: list[str] = Field(default_factory=list)
+    source_mapping: JsonObject = Field(default_factory=dict)
 
 
 class DatasetVersion(ContractModel):
@@ -242,6 +302,85 @@ class Dataset(ContractModel):
     updated_at: datetime
 
 
+class RemoteTrigger(ContractModel):
+    """Public Dataset-scoped trigger metadata; the signing secret is write-only."""
+
+    id: str = Field(min_length=1, max_length=128)
+    project_id: str = Field(min_length=1, max_length=128)
+    dataset_id: str = Field(min_length=1, max_length=128)
+    trigger_url: HttpUrl
+    enabled: bool
+    signature_header: str = Field(
+        default="X-Agent-Eval-Trigger-Signature", min_length=1, max_length=100
+    )
+    secret_mask: str = Field(min_length=1, max_length=64)
+    secret_key_id: str = Field(min_length=1, max_length=128)
+    created_at: datetime
+    updated_at: datetime
+
+
+class RemoteTriggerCreateRequest(ContractModel):
+    trigger_url: HttpUrl
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_trigger_url(self) -> Self:
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(str(self.trigger_url))
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("trigger_url must not contain credentials, query, or fragment")
+        return self
+
+
+class RemoteTriggerUpdateRequest(ContractModel):
+    trigger_url: HttpUrl | None = None
+    enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_trigger_url(self) -> Self:
+        if self.trigger_url is not None:
+            from urllib.parse import urlsplit
+
+            parsed = urlsplit(str(self.trigger_url))
+            if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise ValueError(
+                    "trigger_url must not contain credentials, query, or fragment"
+                )
+        return self
+
+
+class RemoteTriggerCreated(RemoteTrigger):
+    """The plaintext signing secret is returned only in this create response."""
+
+    signing_secret: str = Field(min_length=1, max_length=512)
+
+
+class RemoteTriggerDeliveryStatus(StrEnum):
+    PENDING = "pending"
+    DELIVERING = "delivering"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    FAILED = "failed"
+
+
+class RemoteTriggerDelivery(ContractModel):
+    """Safe delivery observability for a signed remote Experiment trigger."""
+
+    id: str = Field(min_length=1, max_length=128)
+    trigger_id: str = Field(min_length=1, max_length=128)
+    experiment_id: str = Field(min_length=1, max_length=128)
+    delivery_id: str = Field(min_length=1, max_length=128)
+    status: RemoteTriggerDeliveryStatus
+    attempt_count: int = Field(ge=0, le=3)
+    last_http_status: int | None = Field(default=None, ge=100, le=599)
+    last_error_type: str | None = Field(default=None, max_length=64)
+    last_error_message: str | None = Field(default=None, max_length=200)
+    accepted_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class EvaluatorVersion(ContractModel):
     id: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=200)
@@ -254,7 +393,12 @@ class EvaluatorVersion(ContractModel):
     direction: ScoreDirection
     default_threshold: float | None = None
     rubric: str | None = None
-    judge_model: str | None = None
+    evaluator_connection_id: str | None = Field(default=None, max_length=128)
+    provider_connection_id: str | None = Field(default=None, max_length=128)
+    judge_model: str | None = Field(default=None, max_length=200)
+    prompt_template: str | None = None
+    output_schema: JsonObject | None = None
+    sampling_parameters: JudgeSamplingParameters | None = None
     config: JsonObject = Field(default_factory=dict)
     enabled: bool = True
 
@@ -285,7 +429,12 @@ class EvaluatorVersionCreateRequest(ContractModel):
     direction: ScoreDirection
     default_threshold: float | None = None
     rubric: str | None = None
-    judge_model: str | None = None
+    evaluator_connection_id: str | None = Field(default=None, max_length=128)
+    provider_connection_id: str | None = Field(default=None, max_length=128)
+    judge_model: str | None = Field(default=None, min_length=1, max_length=200)
+    prompt_template: str | None = Field(default=None, min_length=1)
+    output_schema: JsonObject | None = None
+    sampling_parameters: JudgeSamplingParameters | None = None
     config: JsonObject = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -302,7 +451,12 @@ class EvaluatorVersionCreateRequest(ContractModel):
             direction=self.direction,
             default_threshold=self.default_threshold,
             rubric=self.rubric,
+            evaluator_connection_id=self.evaluator_connection_id,
+            provider_connection_id=self.provider_connection_id,
             judge_model=self.judge_model,
+            prompt_template=self.prompt_template,
+            output_schema=self.output_schema,
+            sampling_parameters=self.sampling_parameters,
             config=self.config,
         )
         return self
@@ -369,15 +523,32 @@ class AdapterExecutionResult(ContractModel):
     error_message: str | None = None
 
 
+class EvaluationExecutionOptions(ContractModel):
+    """Run-level controls frozen into an Experiment definition."""
+
+    repetitions: int = Field(default=1, ge=1, le=100)
+    concurrency: int = Field(default=4, ge=1, le=100)
+    timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+    max_retries: int = Field(default=2, ge=0, le=5)
+    retry_backoff_seconds: float = Field(default=0.2, ge=0.0, le=30.0)
+
+
 class EvaluationRun(ContractModel):
     id: str = Field(min_length=1, max_length=128)
+    name: str = Field(default="Experiment", min_length=1, max_length=200)
     agent_version_id: str = Field(min_length=1, max_length=128)
     dataset_version_id: str = Field(min_length=1, max_length=128)
     evaluator_version_ids: list[str] = Field(min_length=1)
+    execution_mode: ExperimentExecutionMode = ExperimentExecutionMode.SDK_TASK
+    evidence_policy: EvidencePolicy = EvidencePolicy.TRACE_REQUIRED
     status: RunStatus = RunStatus.QUEUED
     total_cases: int = Field(default=0, ge=0)
     completed_cases: int = Field(default=0, ge=0)
     failed_cases: int = Field(default=0, ge=0)
+    baseline_run_id: str | None = Field(default=None, min_length=1, max_length=128)
+    execution_options: EvaluationExecutionOptions = Field(
+        default_factory=lambda: EvaluationExecutionOptions()
+    )
     configuration_snapshot: JsonObject = Field(default_factory=dict)
     created_at: datetime
     started_at: datetime | None = None
@@ -393,9 +564,16 @@ class EvaluationRun(ContractModel):
 
 
 class EvaluationRunCreateRequest(ContractModel):
+    name: str = Field(default="Experiment", min_length=1, max_length=200)
     agent_version_id: str = Field(min_length=1, max_length=128)
     dataset_version_id: str = Field(min_length=1, max_length=128)
     evaluator_version_ids: list[str] = Field(min_length=1)
+    execution_mode: ExperimentExecutionMode = ExperimentExecutionMode.SDK_TASK
+    evidence_policy: EvidencePolicy = EvidencePolicy.TRACE_REQUIRED
+    baseline_run_id: str | None = Field(default=None, min_length=1, max_length=128)
+    execution_options: EvaluationExecutionOptions = Field(
+        default_factory=lambda: EvaluationExecutionOptions()
+    )
 
     @model_validator(mode="after")
     def validate_unique_evaluators(self) -> EvaluationRunCreateRequest:
@@ -420,8 +598,104 @@ class CaseExecution(ContractModel):
     finished_at: datetime | None = None
 
 
+class ExperimentItemAttempt(ContractModel):
+    """One immutable attempt to execute a Dataset Case in an Experiment."""
+
+    id: str = Field(min_length=1, max_length=128)
+    experiment_id: str = Field(min_length=1, max_length=128)
+    case_id: str = Field(min_length=1, max_length=128)
+    repetition: int = Field(ge=1)
+    attempt: int = Field(ge=1)
+    external_run_id: str = Field(min_length=1, max_length=200)
+    status: ExecutionStatus = ExecutionStatus.QUEUED
+    output: JsonValue = None
+    usage: JsonObject = Field(default_factory=dict)
+    runtime_metadata: JsonObject = Field(default_factory=dict)
+    error_type: str | None = Field(default=None, max_length=100)
+    error_message: str | None = None
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    evidence_status: Literal["pending", "complete", "incomplete", "not_required"] = (
+        "pending"
+    )
+    evidence_reasons: list[str] = Field(default_factory=list)
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class ExperimentItemStartRequest(ContractModel):
+    case_id: str = Field(min_length=1, max_length=128)
+    repetition: int = Field(default=1, ge=1)
+    attempt: int = Field(default=1, ge=1)
+    external_run_id: str = Field(min_length=1, max_length=200)
+    expected_status: Literal["queued"] = "queued"
+    runtime_metadata: JsonObject = Field(default_factory=dict)
+
+
+class ExperimentItemCompleteRequest(ContractModel):
+    expected_status: Literal["running"] = "running"
+    output: JsonValue
+    usage: JsonObject = Field(default_factory=dict)
+    runtime_metadata: JsonObject = Field(default_factory=dict)
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def require_output(self) -> ExperimentItemCompleteRequest:
+        if self.output is None:
+            raise ValueError("completed items require a non-null output")
+        return self
+
+
+class ExperimentItemFailRequest(ContractModel):
+    expected_status: Literal["running"] = "running"
+    error_type: str = Field(min_length=1, max_length=100)
+    error_message: str = Field(min_length=1)
+    output: JsonValue = None
+    usage: JsonObject = Field(default_factory=dict)
+    runtime_metadata: JsonObject = Field(default_factory=dict)
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class ExperimentItemCancelRequest(ContractModel):
+    expected_status: Literal["running"] = "running"
+    runtime_metadata: JsonObject = Field(default_factory=dict)
+
+
+class ExperimentManifestItem(ContractModel):
+    """One frozen Dataset Case and the attempts currently recorded for it."""
+
+    case: DatasetCase
+    attempts: list[ExperimentItemAttempt] = Field(default_factory=list)
+
+
+class ExperimentManifestPage(ContractModel):
+    experiment_id: str = Field(min_length=1, max_length=128)
+    dataset_version_id: str = Field(min_length=1, max_length=128)
+    items: list[ExperimentManifestItem] = Field(default_factory=list)
+    total: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    next_offset: int | None = Field(default=None, ge=0)
+
+
+class SdkContractResponse(ContractModel):
+    contract: Literal["agent-eval-sdk"] = "agent-eval-sdk"
+    major_version: Literal[1] = 1
+    service_version: str = Field(min_length=1)
+
+
 class EvaluationRunDetail(EvaluationRun):
     case_executions: list[CaseExecution] = Field(default_factory=list)
+
+
+class ExperimentPage(ContractModel):
+    """A project-scoped, server-filtered page of immutable Experiments."""
+
+    items: list[EvaluationRun] = Field(default_factory=list)
+    total: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    next_offset: int | None = Field(default=None, ge=0)
 
 
 class TraceSpan(ContractModel):
@@ -436,6 +710,8 @@ class TraceSpan(ContractModel):
     input: JsonValue = None
     output: JsonValue = None
     error: JsonObject | None = None
+    usage: JsonObject = Field(default_factory=dict)
+    cost: JsonValue = None
     attributes: JsonObject = Field(default_factory=dict)
     extensions: JsonObject = Field(default_factory=dict)
 
@@ -446,6 +722,7 @@ class Trace(ContractModel):
     case_id: str | None = Field(default=None, min_length=1, max_length=128)
     status: ExecutionStatus
     spans: list[TraceSpan] = Field(default_factory=list)
+    scores: list[Score] = Field(default_factory=list)
     source: str = Field(default="platform", min_length=1, max_length=100)
     extensions: JsonObject = Field(default_factory=dict)
 
@@ -504,6 +781,7 @@ class TraceToDatasetCaseRequest(ContractModel):
     expected_state: TraceFieldSelection | None = None
     tool_span_ids: list[str] | None = None
     metadata: JsonObject = Field(default_factory=dict)
+    metadata_mapping: dict[str, TraceFieldSelection] = Field(default_factory=dict)
 
 
 class TraceSummary(ContractModel):
@@ -516,6 +794,16 @@ class TraceSummary(ContractModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     created_at: datetime
+
+
+class TraceSummaryPage(ContractModel):
+    """A project-scoped, server-filtered page of Trace summaries."""
+
+    items: list[TraceSummary] = Field(default_factory=list)
+    total: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    next_offset: int | None = Field(default=None, ge=0)
 
 
 class TraceTimelineSpan(ContractModel):
@@ -539,11 +827,16 @@ class TraceTimeline(ContractModel):
 
 class Score(ContractModel):
     id: str = Field(min_length=1, max_length=128)
-    run_id: str = Field(min_length=1, max_length=128)
-    case_id: str = Field(min_length=1, max_length=128)
+    run_id: str | None = Field(default=None, min_length=1, max_length=128)
+    case_id: str | None = Field(default=None, min_length=1, max_length=128)
+    experiment_item_id: str | None = Field(default=None, min_length=1, max_length=128)
+    repetition: int = Field(default=1, ge=1)
+    attempt: int | None = Field(default=None, ge=1)
     metric_name: str = Field(min_length=1, max_length=200)
     evaluator_version_id: str = Field(min_length=1, max_length=128)
     trace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    span_id: str | None = Field(default=None, min_length=1, max_length=128)
+    source: ScoreSource = ScoreSource.AUTOMATED
     status: ScoreStatus
     value: float | None = None
     label: str | None = None
@@ -552,8 +845,10 @@ class Score(ContractModel):
     evidence: list[JsonObject] = Field(default_factory=list)
     rubric: str | None = None
     judge_model: str | None = None
+    provenance: ExternalScoreProvenance | None = None
     threshold: float | None = None
     direction: ScoreDirection
+    raw_response: JsonValue = None
     raw_result: JsonValue = None
 
     @model_validator(mode="after")
@@ -567,6 +862,40 @@ class Score(ContractModel):
             if self.passed is True:
                 raise ValueError("missing, error and not_run scores cannot pass")
         return self
+
+
+class OnlineScoreRequest(ContractModel):
+    """Normalized score submitted for an already-ingested Trace or Span."""
+
+    evaluator_version_id: str = Field(min_length=1, max_length=128)
+    source: Literal["deterministic", "llm_judge", "adapter"]
+    span_id: str | None = Field(default=None, min_length=1, max_length=128)
+    status: ScoreStatus
+    value: float | None = None
+    label: str | None = Field(default=None, min_length=1, max_length=100)
+    passed: bool | None = None
+    explanation: str | None = None
+    evidence: list[JsonObject] = Field(default_factory=list)
+    judge_model: str | None = Field(default=None, max_length=200)
+    provenance: ExternalScoreProvenance | None = None
+    raw_response: JsonValue = None
+    raw_result: JsonValue = None
+
+    @model_validator(mode="after")
+    def validate_score(self) -> OnlineScoreRequest:
+        if self.status in {ScoreStatus.PASSED, ScoreStatus.FAILED}:
+            if self.value is None and self.label is None:
+                raise ValueError("passed or failed scores require value or label")
+            if self.passed is None:
+                raise ValueError("passed or failed scores require an explicit passed flag")
+        if self.status in {ScoreStatus.MISSING, ScoreStatus.ERROR, ScoreStatus.NOT_RUN}:
+            if self.passed is True:
+                raise ValueError("missing, error and not_run scores cannot pass")
+        return self
+
+
+# Score is declared after Trace so the nested response model can be resolved.
+Trace.model_rebuild()
 
 
 class AnnotationQueueCreateRequest(ContractModel):
@@ -714,6 +1043,8 @@ class ComparisonMetricPoint(ContractModel):
     missing_count: int = Field(default=0, ge=0)
     error_count: int = Field(default=0, ge=0)
     passed_count: int = Field(default=0, ge=0)
+    missing_case_ids: list[str] = Field(default_factory=list)
+    error_case_ids: list[str] = Field(default_factory=list)
     delta_average: float | None = None
     delta_pass_rate: float | None = None
 
@@ -747,10 +1078,32 @@ class CaseComparisonRun(ContractModel):
     scores: list[Score] = Field(default_factory=list)
 
 
+class FirstErrorAttribution(ContractModel):
+    category: Literal[
+        "tool_selection",
+        "tool_arguments",
+        "tool_execution",
+        "retrieval",
+        "final_answer",
+        "format",
+        "timeout",
+        "cost_or_latency",
+        "indeterminate",
+    ]
+    reason: str = Field(min_length=1)
+    baseline_trace_id: str | None = None
+    candidate_trace_id: str | None = None
+    baseline_span_id: str | None = None
+    candidate_span_id: str | None = None
+    evidence: list[JsonObject] = Field(default_factory=list)
+
+
 class CaseComparison(ContractModel):
     case_id: str = Field(min_length=1, max_length=128)
     metadata: JsonObject = Field(default_factory=dict)
+    critical: bool = False
     runs: list[CaseComparisonRun] = Field(default_factory=list)
+    first_error: FirstErrorAttribution | None = None
 
 
 class CaseComparisonChange(ContractModel):
@@ -758,6 +1111,24 @@ class CaseComparisonChange(ContractModel):
     run_id: str = Field(min_length=1, max_length=128)
     baseline_run_id: str = Field(min_length=1, max_length=128)
     failed_metrics: list[str] = Field(default_factory=list)
+    critical: bool = False
+    first_error: FirstErrorAttribution | None = None
+
+
+class ComparisonEvidenceGap(ContractModel):
+    run_id: str = Field(min_length=1, max_length=128)
+    metric_name: str = Field(min_length=1, max_length=200)
+    status: Literal["missing", "error"]
+    case_ids: list[str] = Field(default_factory=list)
+
+
+class CriticalTaskImpact(ContractModel):
+    candidate_run_id: str = Field(min_length=1, max_length=128)
+    critical_case_count: int = Field(default=0, ge=0)
+    baseline_failed_count: int = Field(default=0, ge=0)
+    candidate_failed_count: int = Field(default=0, ge=0)
+    newly_regressed_case_ids: list[str] = Field(default_factory=list)
+    recovered_case_ids: list[str] = Field(default_factory=list)
 
 
 class EvaluationComparison(ContractModel):
@@ -769,6 +1140,8 @@ class EvaluationComparison(ContractModel):
     case_comparisons: list[CaseComparison] = Field(default_factory=list)
     new_failures: list[CaseComparisonChange] = Field(default_factory=list)
     recovered_cases: list[CaseComparisonChange] = Field(default_factory=list)
+    missing_evidence: list[ComparisonEvidenceGap] = Field(default_factory=list)
+    critical_task_impact: list[CriticalTaskImpact] = Field(default_factory=list)
     generated_at: datetime
 
 
@@ -779,9 +1152,21 @@ class RegressionGateRule(ContractModel):
     minimum: float | None = None
     maximum: float | None = None
     require_all_passed: bool = False
+    operator: GatePolicyOperator | None = None
+    threshold: float | None = None
+    severity: GatePolicySeverity = GatePolicySeverity.BLOCK
+    critical_task_ids: list[str] = Field(default_factory=list, max_length=1000)
 
     @model_validator(mode="after")
     def validate_condition(self) -> RegressionGateRule:
+        if self.operator is not None:
+            if self.threshold is None:
+                raise ValueError("operator-based gate rules require threshold")
+            if self.minimum is not None or self.maximum is not None:
+                raise ValueError("operator-based gate rules cannot use minimum or maximum")
+            if len(self.critical_task_ids) != len(set(self.critical_task_ids)):
+                raise ValueError("critical_task_ids must be unique")
+            return self
         if (
             self.minimum is None
             and self.maximum is None
@@ -796,11 +1181,55 @@ class RegressionGateRule(ContractModel):
             and self.minimum > self.maximum
         ):
             raise ValueError("minimum cannot exceed maximum")
+        if len(self.critical_task_ids) != len(set(self.critical_task_ids)):
+            raise ValueError("critical_task_ids must be unique")
+        return self
+
+
+class GatePolicyRule(ContractModel):
+    metric: str = Field(min_length=1, max_length=200)
+    operator: GatePolicyOperator
+    threshold: float
+    severity: GatePolicySeverity
+    scope: GatePolicyScope = GatePolicyScope.ALL
+
+
+class GatePolicy(ContractModel):
+    version: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    gates: list[GatePolicyRule] = Field(min_length=1, max_length=50)
+    critical_tasks: list[str] = Field(default_factory=list, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_critical_tasks(self) -> GatePolicy:
+        if len(self.critical_tasks) != len(set(self.critical_tasks)):
+            raise ValueError("critical_tasks must be unique")
+        has_critical_rule = any(
+            rule.scope is GatePolicyScope.CRITICAL for rule in self.gates
+        )
+        if has_critical_rule and not self.critical_tasks:
+            raise ValueError("critical scope requires at least one critical task")
         return self
 
 
 class RegressionGateRequest(ContractModel):
-    rules: list[RegressionGateRule] = Field(min_length=1, max_length=50)
+    rules: list[RegressionGateRule] | None = Field(default=None, min_length=1, max_length=50)
+    policy_yaml: str | None = Field(default=None, min_length=1, max_length=200_000)
+
+    @model_validator(mode="after")
+    def validate_input(self) -> RegressionGateRequest:
+        if (self.rules is None) == (self.policy_yaml is None):
+            raise ValueError("provide exactly one of rules or policy_yaml")
+        return self
+
+
+class ComparisonArtifactRequest(ComparisonRequest):
+    """Request for a portable baseline/candidate artifact."""
+
+    gate: RegressionGateRequest | None = None
 
 
 class RegressionGateRuleResult(ContractModel):
@@ -819,7 +1248,18 @@ class RegressionGateResult(ContractModel):
     run_status: RunStatus
     status: RegressionGateStatus
     rules: list[RegressionGateRuleResult] = Field(default_factory=list)
+    policy_version: str | None = None
     generated_at: datetime
+
+
+class ComparisonArtifact(ContractModel):
+    schema_version: Literal[1] = 1
+    artifact_type: Literal["agent-eval.comparison"] = "agent-eval.comparison"
+    generated_at: datetime
+    baseline_run_id: str = Field(min_length=1, max_length=128)
+    candidate_run_id: str = Field(min_length=1, max_length=128)
+    comparison: EvaluationComparison
+    gate: RegressionGateResult | None = None
 
 
 class HealthResponse(ContractModel):
@@ -832,77 +1272,170 @@ class AccessCheckResponse(ContractModel):
     principal_type: Literal["browser", "agent", "ci"]
 
 
-class AgentCreateRequest(ContractModel):
+class ProjectApiKeyCreateRequest(ContractModel):
     name: str = Field(min_length=1, max_length=200)
+
+
+class ProjectApiKey(ContractModel):
+    id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=200)
+    key_prefix: str = Field(min_length=1, max_length=16)
+    active: bool
+    created_at: datetime
+    last_used_at: datetime | None = None
+
+
+class ProjectApiKeyCreated(ProjectApiKey):
+    key: str = Field(min_length=1)
+
+
+class AgentReleaseRegistrationRequest(ContractModel):
+    """Register immutable release identity without requiring an HTTP endpoint."""
+
+    label: str = Field(min_length=1, max_length=100)
     agent_type: AgentType
-    description: str | None = None
-    prompt_config: PromptConfig | None = None
-    endpoint_config: EndpointConfig | None = None
-
-    @model_validator(mode="after")
-    def validate_execution_config(self) -> AgentCreateRequest:
-        if self.agent_type is AgentType.PROMPT:
-            if self.prompt_config is None or self.endpoint_config is not None:
-                raise ValueError("prompt agents require prompt_config only")
-        elif self.endpoint_config is None or self.prompt_config is not None:
-            raise ValueError("non-prompt agents require endpoint_config only")
-        return self
+    release_identity: str = Field(min_length=1, max_length=200)
+    source_revision: str | None = Field(default=None, min_length=1, max_length=200)
+    metadata: JsonObject = Field(default_factory=dict)
 
 
-class AgentVersionCreateRequest(AgentCreateRequest):
-    label: str = Field(default="", max_length=100)
-
-
-class AgentResponse(ContractModel):
+class AgentReleaseResponse(ContractModel):
     id: str
     project_id: str
-    name: str
-    agent_type: AgentType
-    description: str | None
-    active: bool
-    current_version_id: str | None
-    created_at: datetime
-    updated_at: datetime
-
-
-class AgentVersionResponse(ContractModel):
-    id: str
-    agent_id: str
     version: int
     label: str
     agent_type: AgentType
-    prompt_config: PromptConfig | None
-    endpoint_config: EndpointConfig | None
+    release_identity: str
+    source_revision: str | None
+    metadata: JsonObject = Field(default_factory=dict)
     enabled: bool
     created_at: datetime
 
 
-class AgentConnectionTestRequest(ContractModel):
-    agent_type: AgentType
-    prompt_config: PromptConfig | None = None
-    endpoint_config: EndpointConfig | None = None
-    input: JsonValue = "connection test"
-    variables: JsonObject = Field(default_factory=dict)
-    messages: list[ChatMessage] = Field(default_factory=list)
+class LegacyHttpAgentMigrationRequest(ContractModel):
+    """Convert a historical per-Case HTTP release into a supported runtime mode."""
+
+    legacy_agent_version_id: str = Field(min_length=1, max_length=128)
+    dataset_id: str = Field(min_length=1, max_length=128)
+    target_mode: Literal["remote_upload", "remote_trigger"]
+    trigger_url: HttpUrl | None = None
 
     @model_validator(mode="after")
-    def validate_execution_config(self) -> AgentConnectionTestRequest:
-        if self.agent_type is AgentType.PROMPT:
-            if self.prompt_config is None or self.endpoint_config is not None:
-                raise ValueError("prompt agents require prompt_config only")
-        elif self.endpoint_config is None or self.prompt_config is not None:
-            raise ValueError("non-prompt agents require endpoint_config only")
+    def validate_target(self) -> LegacyHttpAgentMigrationRequest:
+        if self.target_mode == "remote_trigger" and self.trigger_url is None:
+            raise ValueError("trigger_url is required for remote_trigger migration")
+        if self.target_mode == "remote_upload" and self.trigger_url is not None:
+            raise ValueError("trigger_url is only allowed for remote_trigger migration")
+        if self.trigger_url is not None and (
+            self.trigger_url.username
+            or self.trigger_url.password
+            or self.trigger_url.query
+            or self.trigger_url.fragment
+        ):
+            raise ValueError("trigger_url must not contain credentials, query, or fragment")
         return self
 
 
-class AgentConnectionTestResponse(ContractModel):
-    success: bool
-    message: str
-    error_type: str | None = None
-    latency_ms: float = Field(ge=0.0)
-    output: JsonValue | None = None
-    rendered_prompt: str | None = None
-    usage: JsonObject = Field(default_factory=dict)
+class LegacyHttpAgentMigrationResponse(ContractModel):
+    release: AgentReleaseResponse
+    trigger: RemoteTriggerCreated | None = None
+
+
+class EvaluatorConnection(ContractModel):
+    """A user-managed external LLM Judge endpoint reference."""
+
+    id: str = Field(min_length=1, max_length=128)
+    project_id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=200)
+    endpoint: HttpUrl
+    auth_ref: str | None = Field(default=None, min_length=1, max_length=200)
+    timeout_seconds: float = Field(default=60.0, gt=0.0, le=300.0)
+    enabled: bool = True
+    created_at: datetime
+
+
+class EvaluatorConnectionCreateRequest(ContractModel):
+    name: str = Field(min_length=1, max_length=200)
+    endpoint: HttpUrl
+    auth_ref: str | None = Field(default=None, min_length=1, max_length=200)
+    timeout_seconds: float = Field(default=60.0, gt=0.0, le=300.0)
+
+
+class ProviderConnection(ContractModel):
+    """Public metadata for an encrypted platform-managed model connection."""
+
+    id: str = Field(min_length=1, max_length=128)
+    project_id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=200)
+    provider: ProviderKind
+    base_url: HttpUrl
+    model: str = Field(min_length=1, max_length=200)
+    default_parameters: JsonObject = Field(default_factory=dict)
+    credential_mask: str = Field(min_length=1, max_length=64)
+    credential_key_id: str = Field(min_length=1, max_length=128)
+    status: ProviderConnectionStatus
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+    tested_at: datetime | None
+
+
+class ProviderConnectionTestRequest(ContractModel):
+    provider: ProviderKind = ProviderKind.OPENAI_COMPATIBLE
+    base_url: HttpUrl
+    model: str = Field(min_length=1, max_length=200)
+    api_key: SecretStr = Field(min_length=1, max_length=8192)
+    default_parameters: JsonObject = Field(default_factory=dict)
+    timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+
+    @model_validator(mode="after")
+    def validate_provider_configuration(self) -> Self:
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(str(self.base_url))
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError(
+                "base_url must not contain credentials, query, or fragment"
+            )
+        reserved = {"model", "messages", "stream", "api_key", "base_url", "timeout"}
+        normalized = {
+            "".join(character.lower() for character in key if character.isalnum())
+            for key in self.default_parameters
+        }
+        if normalized & {
+            "".join(character for character in key if character.isalnum())
+            for key in reserved
+        }:
+            raise ValueError("default_parameters contains a reserved field")
+        return self
+
+
+class ProviderConnectionCreateRequest(ProviderConnectionTestRequest):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class ProviderConnectionRotateRequest(ContractModel):
+    """Replacement credential for an existing, already validated connection."""
+
+    api_key: SecretStr = Field(min_length=1, max_length=8192)
+    timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+
+
+class ProviderConnectionTestResponse(ContractModel):
+    provider: ProviderKind
+    configured_model: str = Field(min_length=1, max_length=200)
+    response_model: str = Field(min_length=1, max_length=200)
+    upstream_request_id: str = Field(min_length=1, max_length=500)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    total_tokens: int = Field(gt=0)
+    challenge_verified: Literal[True] = True
+
+
+class ProviderConnectionExport(ContractModel):
+    schema_version: Literal[1] = 1
+    generated_at: datetime
+    connections: list[ProviderConnection]
 
 
 class DatasetCreateRequest(ContractModel):

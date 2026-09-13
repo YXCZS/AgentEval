@@ -1,0 +1,10 @@
+version: release-v1
+gates:
+  - metric: task_success
+    operator: gte
+    threshold: 0.90
+    severity: block
+  - metric: p95_latency_ms
+    operator: lte
+    threshold: 3000
+    severity: warning

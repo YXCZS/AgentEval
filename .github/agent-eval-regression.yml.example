@@ -1,0 +1,63 @@
+name: Agent Eval Regression Gate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    env:
+      AGENT_EVAL_API_URL: ${{ secrets.AGENT_EVAL_API_URL }}
+      AGENT_EVAL_PROJECT_ID: ${{ secrets.AGENT_EVAL_PROJECT_ID }}
+      AGENT_EVAL_SESSION: ${{ secrets.AGENT_EVAL_SESSION }}
+      BASELINE_RUN_ID: ${{ secrets.AGENT_EVAL_BASELINE_RUN_ID }}
+      CANDIDATE_RUN_ID: ${{ secrets.AGENT_EVAL_CANDIDATE_RUN_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export comparison artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AGENT_EVAL_API_URL"
+          test -n "$AGENT_EVAL_PROJECT_ID"
+          test -n "$AGENT_EVAL_SESSION"
+          test -n "$BASELINE_RUN_ID"
+          test -n "$CANDIDATE_RUN_ID"
+          payload="$(jq -n \
+            --arg baseline "$BASELINE_RUN_ID" \
+            --arg candidate "$CANDIDATE_RUN_ID" \
+            --rawfile policy examples/ci/release-gate.yaml \
+            '{run_ids: [$baseline, $candidate], gate: {policy_yaml: $policy}}')"
+          curl --fail-with-body --silent --show-error \
+            -X POST "$AGENT_EVAL_API_URL/projects/$AGENT_EVAL_PROJECT_ID/comparisons/artifact?format=json" \
+            -H "Content-Type: application/json" \
+            -H "X-Workspace-Session: $AGENT_EVAL_SESSION" \
+            --data "$payload" \
+            -o comparison.json
+          curl --fail-with-body --silent --show-error \
+            -X POST "$AGENT_EVAL_API_URL/projects/$AGENT_EVAL_PROJECT_ID/comparisons/artifact?format=markdown" \
+            -H "Content-Type: application/json" \
+            -H "X-Workspace-Session: $AGENT_EVAL_SESSION" \
+            --data "$payload" \
+            -o comparison.md
+          jq . comparison.json
+
+      - name: Publish comparison artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-eval-comparison
+          path: |
+            comparison.json
+            comparison.md
+
+      - name: Enforce release gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(jq -r '.gate.status // "INCOMPLETE"' comparison.json)"
+          if [[ "$status" == "BLOCK" ]]; then
+            echo "Agent evaluation gate blocked the release"
+            exit 1
+          fi

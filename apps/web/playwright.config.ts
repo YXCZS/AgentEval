@@ -15,7 +15,12 @@ export default defineConfig({
     env: {
       ...process.env,
       NEXT_PUBLIC_API_URL: "http://api.test",
+      NEXT_PUBLIC_PROJECT_ID: "default-project",
+      NEXT_PUBLIC_WORKSPACE_SESSION: "dev:default-project:e2e-session-secret",
     },
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "mobile-chromium", use: { ...devices["Pixel 7"] } },
+  ],
 });

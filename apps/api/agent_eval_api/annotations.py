@@ -19,10 +19,12 @@ from agent_eval_api.contracts import (
     AnnotationQueueItemCreateRequest,
     AnnotationStatus,
     EvaluatorType,
+    ExternalScoreProvenance,
     HumanScoreAudit,
     HumanScoreRequest,
     Score,
     ScoreDirection,
+    ScoreSource,
     ScoreStatus,
 )
 from agent_eval_api.db import (
@@ -75,8 +77,13 @@ def _score_response(record: ScoreRecord) -> Score:
         id=record.id,
         run_id=record.run_id,
         case_id=record.case_id,
+        experiment_item_id=record.experiment_item_id,
+        repetition=record.repetition,
+        attempt=record.attempt,
         evaluator_version_id=record.evaluator_version_id,
         trace_id=record.trace_id,
+        span_id=record.span_id,
+        source=ScoreSource(record.source),
         metric_name=record.metric_name,
         status=ScoreStatus(record.status),
         value=record.value,
@@ -86,8 +93,14 @@ def _score_response(record: ScoreRecord) -> Score:
         evidence=record.evidence,
         rubric=record.rubric,
         judge_model=record.judge_model,
+        provenance=(
+            ExternalScoreProvenance.model_validate(record.provenance)
+            if record.provenance is not None
+            else None
+        ),
         threshold=record.threshold,
         direction=ScoreDirection(record.direction),
+        raw_response=record.raw_response,
         raw_result=record.raw_result,
     )
 
@@ -290,6 +303,7 @@ def _snapshot(record: ScoreRecord) -> dict[str, Any]:
         "passed": record.passed,
         "explanation": record.explanation,
         "evidence": record.evidence,
+        "source": record.source,
     }
 
 
@@ -324,7 +338,7 @@ def submit_human_score(
                 detail="value is above evaluator score_max",
             )
 
-    record = db.scalar(
+    records = db.scalars(
         select(ScoreRecord)
         .where(
             ScoreRecord.run_id == item.run_id,
@@ -333,7 +347,20 @@ def submit_human_score(
             ScoreRecord.metric_name == evaluator.name,
         )
         .with_for_update()
+    ).all()
+    record = next((row for row in records if row.source == ScoreSource.HUMAN.value), None)
+    placeholder = next(
+        (
+            row
+            for row in records
+            if row.source == ScoreSource.AUTOMATED.value
+            and row.status == ScoreStatus.NOT_RUN.value
+        ),
+        None,
     )
+    if record is None and placeholder is not None:
+        record = placeholder
+        record.source = ScoreSource.HUMAN.value
     if record is None or record.status == ScoreStatus.NOT_RUN.value:
         previous = None
         action = "created"
@@ -348,9 +375,11 @@ def submit_human_score(
             evaluator_version_id=evaluator.id,
             metric_name=evaluator.name,
             direction=evaluator.direction,
+            source=ScoreSource.HUMAN.value,
         )
         db.add(record)
     record.trace_id = item.trace_id
+    record.span_id = None
     record.status = ScoreStatus.PASSED.value if payload.passed else ScoreStatus.FAILED.value
     record.value = payload.value
     record.label = _sanitize_text(payload.label, settings)
@@ -379,6 +408,30 @@ def submit_human_score(
     item.completed_at = datetime.now(UTC)
     db.commit()
     db.refresh(record)
+    return _score_response(record)
+
+
+@router.get("/{queue_id}/items/{item_id}/score", response_model=Score)
+def get_human_score(
+    project_id: str,
+    queue_id: str,
+    item_id: str,
+    db: Session = Depends(get_db),  # noqa: B008
+    _: AuthContext = Depends(require_project_access),  # noqa: B008
+) -> Score:
+    """Return the persisted human score for one queue item, if it has been reviewed."""
+
+    queue, item = _get_item(db, project_id, queue_id, item_id)
+    record = db.scalar(
+        select(ScoreRecord).where(
+            ScoreRecord.run_id == item.run_id,
+            ScoreRecord.case_id == item.case_id,
+            ScoreRecord.evaluator_version_id == queue.evaluator_version_id,
+            ScoreRecord.source == ScoreSource.HUMAN.value,
+        )
+    )
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="human score not found")
     return _score_response(record)
 
 

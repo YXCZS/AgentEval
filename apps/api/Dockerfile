@@ -4,7 +4,6 @@ WORKDIR /workspace
 COPY pyproject.toml ./
 COPY apps/api ./apps/api
 COPY apps/worker ./apps/worker
-COPY examples ./examples
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
 RUN pip install --no-cache-dir .

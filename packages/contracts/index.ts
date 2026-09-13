@@ -6,7 +6,7 @@ export type JsonValue =
   | boolean
   | null;
 
-export type AgentType = "prompt" | "rag" | "tool" | "custom";
+export type AgentType = "rag" | "tool" | "custom";
 export type RunStatus =
   | "queued"
   | "running"

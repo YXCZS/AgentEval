@@ -18,6 +18,12 @@ from .base import (
     EvaluatorOutcome,
 )
 from .deterministic import DETERMINISTIC_EVALUATORS, evaluate_deterministic
+from .external_protocols import (
+    ExternalJudgeConfig,
+    ExternalJudgeResult,
+    ExternalProtocolError,
+    call_external_judge,
+)
 from .future_adapters import (
     FUTURE_ADAPTER_CAPABILITIES,
     FUTURE_ADAPTERS,
@@ -28,18 +34,21 @@ from .future_adapters import (
 )
 from .judge import (
     DEFAULT_RUBRICS,
-    JudgeDecision,
-    JudgeProviderConfig,
-    JudgeProviderError,
     evaluate_llm_judge,
 )
-from .prompt_metrics import (
-    EmbeddingProviderConfig,
-    EmbeddingProviderError,
-    evaluate_prompt_deterministic,
-    semantic_similarity,
+from .managed_provider import (
+    ManagedJudgeConfig,
+    ManagedJudgeError,
+    ManagedJudgeRetryableError,
+    evaluate_managed_judge,
 )
-from .scoring import evaluate_and_persist_scores
+from .scoring import (
+    attempt_execution_record,
+    build_evaluation_context,
+    evaluate_and_persist_scores,
+    is_managed_judge_snapshot,
+    replace_pending_managed_score,
+)
 
 __all__ = [
     "ADAPTERS",
@@ -47,13 +56,15 @@ __all__ = [
     "aggregate_run_scores",
     "DETERMINISTIC_EVALUATORS",
     "EvaluationContext",
-    "EmbeddingProviderConfig",
-    "EmbeddingProviderError",
     "DeepEvalAdapter",
     "Evaluator",
     "EvaluatorConfigurationError",
     "EvaluatorOutcome",
     "evaluate_deterministic",
+    "ExternalJudgeConfig",
+    "ExternalJudgeResult",
+    "ExternalProtocolError",
+    "call_external_judge",
     "FUTURE_ADAPTER_CAPABILITIES",
     "FUTURE_ADAPTERS",
     "FutureAdapter",
@@ -61,9 +72,6 @@ __all__ = [
     "get_future_adapter",
     "list_future_adapter_capabilities",
     "DEFAULT_RUBRICS",
-    "JudgeDecision",
-    "JudgeProviderConfig",
-    "JudgeProviderError",
     "PromptfooAdapter",
     "RagasAdapter",
     "ThirdPartyAdapter",
@@ -71,6 +79,12 @@ __all__ = [
     "evaluate_adapter",
     "evaluate_and_persist_scores",
     "evaluate_llm_judge",
-    "evaluate_prompt_deterministic",
-    "semantic_similarity",
+    "evaluate_managed_judge",
+    "ManagedJudgeConfig",
+    "ManagedJudgeError",
+    "ManagedJudgeRetryableError",
+    "build_evaluation_context",
+    "attempt_execution_record",
+    "is_managed_judge_snapshot",
+    "replace_pending_managed_score",
 ]

@@ -167,6 +167,42 @@ def test_case_edits_create_new_versions_without_mutating_history(
     assert len(original.json()["cases"]) == 1
 
 
+def test_archiving_case_creates_version_without_mutating_history(
+    dataset_client: tuple[TestClient, Settings, Session],
+) -> None:
+    client, settings, _ = dataset_client
+    created = client.post(
+        "/projects/project-1/datasets",
+        json={"name": "Orders", "cases": cases()[:2]},
+        headers=headers(settings),
+    )
+    assert created.status_code == 201
+    dataset = created.json()
+    version_id = dataset["current_version_id"]
+
+    archived = client.delete(
+        f"/projects/project-1/datasets/{dataset['id']}/versions/{version_id}/cases/rag-1",
+        headers=headers(settings),
+    )
+
+    assert archived.status_code == 201
+    assert archived.json()["version"] == 2
+    assert [case["id"] for case in archived.json()["cases"]] == ["prompt-1"]
+
+    original = client.get(
+        f"/projects/project-1/datasets/{dataset['id']}/versions/{version_id}",
+        headers=headers(settings),
+    )
+    assert original.status_code == 200
+    assert {case["id"] for case in original.json()["cases"]} == {"prompt-1", "rag-1"}
+
+    missing = client.delete(
+        f"/projects/project-1/datasets/{dataset['id']}/versions/{archived.json()['id']}/cases/rag-1",
+        headers=headers(settings),
+    )
+    assert missing.status_code == 404
+
+
 def test_dataset_metadata_and_project_boundary_are_enforced(
     dataset_client: tuple[TestClient, Settings, Session],
 ) -> None:
@@ -362,9 +398,18 @@ def test_trace_can_create_a_versioned_dataset_case(
         json={
             "id": "trace-case-42",
             "trace_id": "trace-order-42",
+            "input": {"span_id": "agent", "field": "input"},
             "expected_output": {"span_id": "result", "field": "output"},
+            "expected_state": {"span_id": "result", "field": "output"},
             "tool_span_ids": ["tool"],
             "metadata": {"category": "orders"},
+            "metadata_mapping": {
+                "tool_name": {
+                    "span_id": "tool",
+                    "field": "attributes",
+                    "attribute_key": "tool.name",
+                }
+            },
         },
         headers=headers(settings),
     )
@@ -374,8 +419,84 @@ def test_trace_can_create_a_versioned_dataset_case(
     case = created.json()["cases"][0]
     assert case["input"] == {"request": "Where is order 42?"}
     assert case["expected_output"] == {"status": "shipped"}
+    assert case["expected_state"] == {"status": "shipped"}
     assert case["expected_tools"] == [
         {"name": "search_order", "arguments": {"order_id": "42"}, "order": 0}
     ]
     assert case["source_trace_id"] == "trace-order-42"
-    assert case["metadata"] == {"category": "orders", "source": "trace"}
+    assert case["source_span_ids"] == ["agent", "result", "tool"]
+    assert case["source_mapping"] == {
+        "input": {
+            "span_id": "agent",
+            "field": "input",
+            "attribute_key": None,
+        },
+        "expected_output": {
+            "span_id": "result",
+            "field": "output",
+            "attribute_key": None,
+        },
+        "expected_state": {
+            "span_id": "result",
+            "field": "output",
+            "attribute_key": None,
+        },
+        "tool_span_ids": ["tool"],
+        "metadata_mapping": {
+            "tool_name": {
+                "span_id": "tool",
+                "field": "attributes",
+                "attribute_key": "tool.name",
+            }
+        },
+    }
+    assert case["metadata"] == {
+        "category": "orders",
+        "tool_name": "search_order",
+        "source": "trace",
+    }
+
+
+def test_trace_without_output_creates_case_with_optional_expected_output(
+    dataset_client: tuple[TestClient, Settings, Session],
+) -> None:
+    client, settings, _ = dataset_client
+    dataset = client.post(
+        "/projects/project-1/datasets",
+        json={"name": "Input-only traces", "cases": []},
+        headers=headers(settings),
+    ).json()
+    started_at = datetime.now(UTC)
+    trace = client.post(
+        "/projects/project-1/traces",
+        json={
+            "trace_id": "trace-input-only",
+            "status": "completed",
+            "spans": [
+                {
+                    "span_id": "agent-input-only",
+                    "trace_id": "trace-input-only",
+                    "kind": "agent",
+                    "name": "input-only-agent",
+                    "status": "completed",
+                    "started_at": started_at.isoformat(),
+                    "input": {"question": "What is order 42?"},
+                }
+            ],
+        },
+        headers=headers(settings),
+    )
+    assert trace.status_code == 201
+
+    created = client.post(
+        f"/projects/project-1/datasets/{dataset['id']}/versions/{dataset['current_version_id']}/cases/from-trace",
+        json={"id": "trace-input-only-case", "trace_id": "trace-input-only"},
+        headers=headers(settings),
+    )
+
+    assert created.status_code == 201
+    case = created.json()["cases"][0]
+    assert case["input"] == {"question": "What is order 42?"}
+    assert case["expected_output"] is None
+    assert case["source_trace_id"] == "trace-input-only"
+    assert case["source_span_ids"] == ["agent-input-only"]

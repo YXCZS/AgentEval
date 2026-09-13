@@ -78,6 +78,8 @@ def export_report_csv(
         "evidence",
         "rubric",
         "judge_model",
+        "provenance",
+        "raw_response",
         "threshold",
         "direction",
         "aggregate_valid_count",
@@ -128,6 +130,10 @@ def export_report_csv(
                     "judge_model": (
                         score.judge_model if score else evaluator.get("judge_model", "")
                     ),
+                    "provenance": _dump(score.provenance.model_dump(mode="json"))
+                    if score and score.provenance
+                    else "{}",
+                    "raw_response": _dump(score.raw_response) if score else "null",
                     "threshold": (
                         score.threshold if score else evaluator.get("default_threshold", "")
                     ),

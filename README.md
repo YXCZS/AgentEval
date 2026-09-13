@@ -1,272 +1,184 @@
 # Agent Eval Workbench
 
-一个面向 Prompt、RAG、Tool 和 Custom Agent 的自托管可视化评测与回归分析平台。
-它把 Agent、数据集、评测器和运行配置全部版本化，逐样本执行评测，保存可解释的
-Trace 与 Score，并通过报告和 Regression Gate 帮助发现质量回退。
+面向已经运行的 **RAG、Tool 与 Custom Agent** 的自托管质量平台。平台保存真实 Agent 的 Trace、Dataset、Experiment 和 Score，并用 baseline/candidate 比较、首错归因与 Release Gate 支持回归分析。
 
-> 项目定位：一个可运行的 Agent Evaluation Workbench 原型，重点展示评测平台的
-> 完整工程链路，而不是声称存在一个适用于所有 Agent 的“万能总分”。
+> 平台不托管 Prompt Agent，不执行用户上传的 Agent 源码，也不保存业务 Agent 的模型 Key。MVP 通过 Python SDK 在用户自己的进程中运行真实 Agent。
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Node](https://img.shields.io/badge/Node.js-22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 
 ## 产品预览
 
-首页工作台展示评测运行、通过率、失败样本和 Agent 质量信号：
+中文 Trace-first 工作台展示 Project 中已经上报的真实 Trace、Dataset、Experiment、失败样本与 Gate 状态：
 
 ![Agent Eval Workbench overview](docs/assets/workbench-overview.png)
 
-平台中的核心工作流是：注册 Agent -> 导入版本化 Dataset -> 选择 Evaluator ->
-启动 Evaluation Run -> 查看 Trace 和 Score -> 比较版本 -> 执行 Regression Gate。
+核心闭环：
+
+```text
+用户 Agent -> SDK/OTel Trace -> Dataset Case -> Experiment
+          -> Score -> baseline/candidate -> 首错归因 -> Release Gate
+```
 
 ## 核心能力
 
-| 能力 | 当前实现 |
+| 能力 | 说明 |
 | --- | --- |
-| Agent 接入 | Prompt Agent 配置、HTTP Agent `/run` 协议、Prompt/RAG/Tool/Custom 类型 |
-| Dataset | 手动录入、CSV/JSON/JSONL 导入、字段映射、预览校验、不可变版本 |
-| Evaluator | 确定性评测器、LLM Judge 边界、第三方适配器能力合同 |
-| 执行引擎 | Celery + Redis 异步逐 case 执行，单样本失败隔离、重试和取消 |
-| 可观测性 | Canonical Trace/TraceSpan，记录 prompt、LLM、retrieval、tool、guardrail 等步骤 |
-| 报告 | 指标聚合、失败样本、Score evidence、Trace timeline、CSV/JSON 导出 |
-| 回归分析 | Baseline/Candidate 运行比较、新失败/恢复样本、Regression Gate |
-| 工程质量 | OpenAPI 合同、Alembic 迁移、pytest、Playwright E2E、Ruff、mypy、CI |
+| Agent 接入 | 用户在自己的 Python 进程中调用真实 Tool/RAG/Custom Agent；SDK 不读取业务模型 Key |
+| Trace | Canonical JSON、OpenInference-shaped JSON、OTLP HTTP JSON；Span 树、幂等、限流和脱敏 |
+| Dataset | UI/API 创建，支持 CSV/JSON/JSONL 预览导入和不可变 Version |
+| Experiment | 固定 Dataset Version、Agent Release、Evaluator Version 和执行参数 |
+| Evaluator | 任务成功、Schema、工具选择/参数、延迟、Token、成本等确定性指标 |
+| 回归诊断 | 同一 Dataset Version 上比较 baseline/candidate，报告新增失败、恢复和首个分歧 |
+| 发布决策 | YAML Gate 输出 `PASS/WARNING/BLOCK/INCOMPLETE/INDETERMINATE` |
+| 工程交付 | FastAPI、PostgreSQL、Redis/Celery、Next.js、OpenAPI、Alembic、pytest、Playwright |
 
-## 评测模型
-
-平台不强行合成一个总分，而是将不同维度分别报告：
-
-- **任务成功**：目标状态、结构化输出或业务结果是否满足预期。
-- **答案质量**：相关性、正确性、忠实性等可由 Judge 或 RAG 评测器计算。
-- **Tool 行为**：工具名称、参数和调用顺序是否正确。
-- **安全与策略**：策略合规、JSON Schema、拒答等确定性门禁。
-- **效率成本**：延迟、Token 用量和估算成本。
-- **回归信号**：候选版本相对基线是否出现新失败或指标下降。
-
-Score 有明确状态：`passed`、`failed`、`missing`、`error`、`not_run`。缺失或评测器
-错误不会被静默当作通过。
-
-## 系统架构
+## 架构
 
 ```mermaid
 flowchart LR
-    U[用户 / CI] --> W[Next.js Web UI]
-    U --> A[FastAPI REST API]
-    W --> A
-    A --> PG[(PostgreSQL)]
-    A --> R[(Redis)]
-    R --> C[Celery Worker]
-    C --> T[Agent Adapter]
-    T --> P[Prompt Agent]
-    T --> H[HTTP Agent]
-    C --> E[Evaluator Engine]
-    E --> S[Score / Report]
-    C --> PG
-    A --> O[OpenAPI / Contracts]
+    Agent[用户自己的 Agent 进程] --> SDK[agent-eval-sdk]
+    SDK -->|Experiment/Item/结果| API[FastAPI 控制平面]
+    SDK -->|OTel HTTP Trace| API
+    API --> DB[(PostgreSQL)]
+    API --> Web[Next.js 工作台]
+    API --> Queue[(Redis)]
+    Queue --> Worker[Celery Worker]
+    Worker --> DB
+    API --> CI[CI / Gate 报告]
 ```
 
-### 关键数据链路
+一次 SDK Experiment 的数据流：
 
-```mermaid
-sequenceDiagram
-    participant User as User / CI
-    participant API as FastAPI API
-    participant DB as PostgreSQL
-    participant Queue as Redis + Celery
-    participant Agent as Agent Endpoint
-    participant Eval as Evaluator
-
-    User->>API: 创建 Agent / Dataset / Evaluator 版本
-    API->>DB: 保存不可变资源
-    User->>API: 创建 Evaluation Run
-    API->>DB: 冻结版本快照
-    API->>Queue: 为每个 Dataset Case 投递任务
-    Queue->>Agent: POST /run
-    Agent-->>Queue: output + tool_calls + usage + trace
-    Queue->>DB: 写入 Trace / TraceSpan / CaseExecution
-    Queue->>Eval: 执行确定性或 Judge 评测
-    Eval->>DB: 写入 Score
-    User->>API: 查询 Report / Compare / Gate
-    API->>DB: 聚合指标并返回可解释结果
+```text
+1. 页面或 SDK 固定 Dataset Version、Agent Release、Evaluator Version
+2. SDK 从 API 读取不可变 Case manifest
+3. SDK 在用户进程调用用户自己的真实 Agent
+4. SDK 为每个 Case 建立根 Trace，并保留 Agent/LLM/Tool 子 Span
+5. SDK 上传 Item 结果和 Trace，API 校验证据并持久化
+6. API 根据真实输出运行确定性 Evaluator，生成 Score 和聚合指标
+7. 第二个 Release 使用同一 Dataset Version 运行
+8. Comparison、Attribution 和 Gate 读取持久化证据并给出结果
 ```
-
-### 持久化模型
-
-```mermaid
-erDiagram
-    PROJECT ||--o{ AGENT : owns
-    AGENT ||--o{ AGENT_VERSION : has
-    PROJECT ||--o{ DATASET : owns
-    DATASET ||--o{ DATASET_VERSION : has
-    DATASET_VERSION ||--o{ DATASET_CASE : contains
-    PROJECT ||--o{ EVALUATOR_VERSION : owns
-    PROJECT ||--o{ EVALUATION_RUN : owns
-    EVALUATION_RUN ||--o{ CASE_EXECUTION : schedules
-    CASE_EXECUTION ||--o| TRACE : records
-    TRACE ||--o{ TRACE_SPAN : contains
-    CASE_EXECUTION ||--o{ SCORE : receives
-    EVALUATION_RUN ||--o{ AGGREGATE_METRIC : aggregates
-```
-
-运行开始时会冻结 Agent、Dataset、Evaluator、Prompt、模型和采样参数快照，确保历史
-报告在资源后续修改后仍然可解释。
 
 ## 技术栈
 
-| 层 | 技术 |
-| --- | --- |
-| Web | Next.js 16、React 19、TypeScript、Tailwind CSS、Recharts、Lucide React |
-| API | Python 3.12、FastAPI、Uvicorn、Pydantic Settings、HTTPX |
-| 数据访问 | SQLAlchemy 2、Alembic、PostgreSQL 16；测试可使用 SQLite |
-| 异步任务 | Celery 5、Redis 7 |
-| 工程工具 | pytest、Playwright、Ruff、mypy、Docker Compose、GitHub Actions |
+| 层 | 技术 | 作用 |
+| --- | --- | --- |
+| Web | Next.js、React、TypeScript、Recharts、Lucide | 中文工作台 |
+| API | Python 3.12、FastAPI、Pydantic、HTTPX | 合同、鉴权、持久化 API |
+| 数据 | PostgreSQL、SQLAlchemy、Alembic | 版本、运行记录和证据 |
+| 异步 | Redis、Celery | 执行平台托管 Provider Judge、评分聚合和后台任务；Agent 本身仍由 SDK/用户运行器执行 |
+| 观测 | OpenTelemetry、OpenInference 语义字段 | 关联真实 Agent 轨迹 |
+| 交付 | Docker Compose、OpenAPI、GitHub Actions | 单机部署和 CI |
+| 测试 | pytest、Playwright、Ruff、mypy | 单元、集成、浏览器和静态检查 |
 
-## 快速开始
+## 单机运行
 
-### 环境要求
-
-- Docker Desktop 和 Compose v2
-- 若不使用容器：Python 3.12、Node.js 22、npm
-
-### 启动完整演示环境
+要求 Docker Desktop 与 Docker Compose v2：
 
 ```powershell
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
 docker compose -f infra/docker-compose.yml up -d --build --wait
+docker compose -f infra/docker-compose.yml ps
 ```
 
-Compose 会自动读取根目录的 `.env`。`.env` 只用于本地运行，已被 Git 忽略；
-GitHub 中保留的是 `.env.example`。
+打开 Web：<http://127.0.0.1:3000>。API 文档地址取决于 `.env` 中的 `AGENT_EVAL_API_PORT`，例如端口为 `18080` 时访问 <http://127.0.0.1:18080/docs>；未设置时使用 Compose 默认端口 `8000`。
 
-访问：
+如果宿主机端口已被其他项目占用，在未跟踪的 `.env` 中同时修改宿主端口和浏览器访问的 API 地址，例如：
 
-- Web UI：http://127.0.0.1:3000
-- API：http://127.0.0.1:8000
-- Swagger：http://127.0.0.1:8000/docs
-- 示例 Prompt Agent：http://127.0.0.1:8101/docs
-- 示例 RAG Agent：http://127.0.0.1:8102/docs
-- 示例 Order Tool Agent：http://127.0.0.1:8103/docs
+```dotenv
+AGENT_EVAL_WEB_PORT=13000
+AGENT_EVAL_API_PORT=18080
+NEXT_PUBLIC_API_URL=http://127.0.0.1:18080
+AGENT_EVAL_BASE_URL=http://127.0.0.1:18080
+```
 
-API 和 Worker 启动前会执行 Alembic migration，并由 API 自动创建本地 `project-1`。
-Compose 使用 PostgreSQL volume 保存演示数据。
+修改 `NEXT_PUBLIC_API_URL` 后需要重新执行带 `--build` 的启动命令，因为该值会在 Next.js 构建时写入浏览器代码。
 
-### 运行版本回归 Demo
+Compose 只启动 Web、API、Worker、PostgreSQL 和 Redis，不启动内置 Agent、Seeder 或固定回归 Demo。`.env` 仅用于本地，GitHub 只提交 `.env.example`。
 
-推荐在 API 容器内执行 Demo。这样容器可以直接读取 `.env` 中的 session secret，
-同时可以通过 Compose 服务名访问示例 Agent：
+## MVP 使用方式
+
+1. 在 Dataset 页面创建或导入测试集，提交后选择固定 Version。
+2. 在 Agent Release 页面登记 Agent 的版本身份，例如 Git SHA 或镜像摘要；这里不填写 Agent URL 或模型 Key。
+3. 在 Evaluator 页面创建确定性评测规则。
+4. 在 Experiment 页面选择 Dataset Version、Release 和 Evaluator，创建 `sdk_task` Experiment。
+5. 在用户自己的 Agent 项目中安装本仓库的 `sdk/python` SDK，调用 `ExperimentRunner.run(..., task=真实Agent函数)`。
+6. 返回工作台查看 Item、Trace、Span、Score、Comparison 和 Gate。
+
+从仓库根目录安装并确认 SDK 可导入：
 
 ```powershell
-docker compose -f infra/docker-compose.yml exec -T api sh -c 'python examples/seed_regression_demo.py --api-url http://127.0.0.1:8000 --workspace-session "dev:project-1:$WORKSPACE_SESSION_SECRET" --agent-url http://order-agent:8103/run'
+pip install -e .\sdk\python
+python -c "import agent_eval; print(agent_eval.__version__)"
 ```
 
-Demo 会创建 Dataset v1/v2、基线与候选 Tool Agent、确定性 Evaluator、两次运行、
-版本比较以及一个刻意失败的 Regression Gate。
+最小 SDK 结构如下，`run_agent` 必须由用户自己实现并使用真实模型与工具：
 
-## Agent 如何接入
+```python
+from agent_eval import Client, ExperimentRunner
+from my_agent import run_agent
 
-平台不执行用户上传的 Agent 源码。接入方式有两种：
+client = Client()
+dataset = client.get_dataset("dataset-id", version_id="dataset-version-id")
+release = client.get_release("agent-release-id")
 
-1. **Prompt Agent**：在 UI/API 中保存 OpenAI-compatible endpoint、prompt template、
-   model 和采样参数，由平台的 Prompt Runner 发起调用。
-2. **HTTP Agent**：用户自行部署 Agent，平台通过 HTTP `POST /run` 调用。容器网络中
-   必须使用可达地址，例如 `http://order-agent:8103/run`，不能在 API 容器中使用
-   `localhost` 指向用户电脑。
-
-HTTP 请求与响应示例：
-
-```json
-{
-  "input": "Cancel order 42",
-  "variables": {},
-  "messages": [],
-  "metadata": {"run_id": "...", "case_id": "..."},
-  "trace_id": "..."
-}
+result = ExperimentRunner(client).run(
+    dataset=dataset,
+    task=run_agent,
+    release=release,
+    evaluator_version_ids=["evaluator-version-id"],
+    name="tool-agent candidate",
+    evidence_policy="tool_trajectory_required",
+)
+print(result.experiment.id, result.experiment.status)
 ```
 
-```json
-{
-  "output": {"status": "cancelled"},
-  "tool_calls": [{"name": "search_order", "arguments": {"order_id": "42"}, "order": 0}],
-  "usage": {"input_tokens": 20, "output_tokens": 8, "cost": 0.001},
-  "trace": {"trace_id": "...", "spans": []}
-}
-```
+平台不会因为没有用户 Agent 就生成成功率、Trace、Score 或 Experiment 假数据。没有真实模型调用和完整证据时，结果会失败或为 `INCOMPLETE`。
 
-## 数据集格式
-
-CSV、JSON 和 JSONL 最终都会映射到统一的 Dataset Case：
-
-| 字段 | 用途 |
-| --- | --- |
-| `id` | 稳定且唯一的 case 标识 |
-| `input` | 发给 Agent 的文本或结构化输入 |
-| `variables` / `messages` | Prompt 变量和多轮上下文 |
-| `expected_output` | 参考答案或结构化结果 |
-| `output_schema` | 结构化输出 JSON Schema |
-| `criteria` | 自然语言评测标准 |
-| `expected_tools` / `expected_state` | Tool 调用和业务状态期望 |
-| `retrieval_context` | RAG 忠实性/上下文相关性参考资料 |
-| `metadata` | 标签、难度、分类等分组信息 |
-
-CSV 中的嵌套字段应保存为合法 JSON；包含多轮消息、工具或 retrieval context 时，
-推荐使用 JSONL。
-
-## 目录结构
+## 项目结构
 
 ```text
-apps/
-  web/       Next.js 工作台
-  api/       FastAPI 路由、领域服务和数据访问
-  worker/    Celery 任务与评测执行器
-examples/    Prompt、RAG、Tool Agent 和回归 Demo
-packages/
-  contracts/ OpenAPI 与共享合同
-migrations/  Alembic 数据库迁移
-tests/       unit / integration 测试
-infra/       Docker Compose 拓扑
-docs/        使用、架构和运维文档
+apps/web/       Next.js 中文工作台
+apps/api/       FastAPI 路由、合同、持久化与诊断
+apps/worker/    Celery 基础 Worker；旧 HTTP 路径仅作迁移兼容
+infra/          Docker Compose 单机拓扑
+migrations/     Alembic 数据库迁移
+packages/       OpenAPI/TypeScript 合同
+sdk/python/     可独立安装的 Python SDK
+tests/          单元、集成、fixture 与 Playwright E2E
+docs/           使用、架构、协议、运维和迁移文档
 ```
 
-## 本地开发与验证
+## 开发验证
 
 ```powershell
 pip install -e ".[dev]"
-python -m pytest tests/unit tests/integration
-python -m ruff check apps/api apps/worker examples tests
-python -m mypy apps/api apps/worker examples
+python -m pytest tests/unit tests/integration sdk/python/tests
+python -m ruff check apps/api apps/worker sdk/python tests
 
 Push-Location apps/web
 npm ci
 npm run typecheck
 npm run build
-npm run test:e2e
 Pop-Location
 ```
 
-Playwright E2E 在浏览器边界 mock API，不要求本地 Docker；Compose health job 会额外
-验证容器、PostgreSQL、Redis、migration 和示例 Agent。
+## 安全边界
 
-若只在宿主机运行 Web 开发服务器，请先执行 `Copy-Item apps/web/.env.example
-apps/web/.env.local`，并确保 API 已在 `8000` 端口运行。
-
-## 安全与隐私
-
-- 不要提交 `.env`、API key、数据库文件、日志、抓取结果或构建产物。
-- `.env.example` 只包含不可用的占位符；生产环境必须使用随机生成的密钥。
-- Agent 的 HTTP credential 和 LLM key 只作为 secret 配置，不应写入 Trace。
-- Trace 字段按敏感字段名脱敏，并限制单字段大小。
-- 每个 project-scoped API 都执行项目边界检查；浏览器 session 和项目 API key 分离。
-- 发布前执行 `git diff --cached` 和仓库密钥扫描；若密钥曾进入 Git 历史，仅删除文件是不够的，必须轮换密钥并清理历史。
-
-发布前建议安装并运行 `gitleaks`：
-
-```powershell
-gitleaks detect --source . --no-banner --redact
-```
+- `.env`、数据库、日志、构建缓存和本地 Artifact 被 Git 忽略，只提交 `.env.example`。
+- Project API Key 只保存哈希；Trace 在持久化和返回前脱敏。
+- 业务 Agent 的模型 Key 留在用户自己的 Agent 进程中。
+- 平台 Worker 不在 MVP 中逐 Case 调用 Agent `/run`；旧 HTTP 适配器仅供 V1.2 迁移。
+- 所有 Score、Comparison 和 Gate 都来自持久化真实证据，缺少证据不会默认通过。
 
 ## 文档
 
-- [使用指南](docs/usage.md)
-- [架构与取舍](docs/architecture.md)
-- [运维指南](docs/operations.md)
+- [零基础使用指南](docs/usage.md)
+- [架构与数据流](docs/architecture.md)
+- [参考产品、架构来源与边界](docs/reference-comparison.md)
+- [外部协议](docs/external-protocols.md)
+- [Trace 接入范围](docs/trace-ingestion.md)
+- [单机部署与运维](docs/operations.md)

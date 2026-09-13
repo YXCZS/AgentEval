@@ -1,16 +1,20 @@
-from examples.order_agent.app import app as order_app
-from examples.prompt_agent.app import app as prompt_app
-from examples.rag_agent.app import app as rag_app
 from fastapi.testclient import TestClient
+from tests.fixtures.example_agents import custom_app, order_app, rag_app
 
 
-def test_prompt_agent_returns_protocol_output() -> None:
-    response = TestClient(prompt_app).post(
-        "/run", json={"input": {"question": "Where is my order?"}}
+def test_custom_agent_returns_schema_oriented_output() -> None:
+    response = TestClient(custom_app).post(
+        "/run", json={"input": {"subject": "invoice", "priority": "HIGH"}}
     )
 
     assert response.status_code == 200
-    assert response.json()["output"]["answer"] == "Support answer: Where is my order?"
+    assert response.json()["output"] == {
+        "category": "custom",
+        "subject": "invoice",
+        "priority": "high",
+        "accepted": True,
+    }
+    assert response.json()["tool_calls"] == []
 
 
 def test_rag_agent_returns_retrieval_evidence() -> None:
@@ -31,14 +35,8 @@ def test_order_agent_covers_policy_and_order_id_paths() -> None:
     refund = client.post(
         "/run", json={"input": {"action": "refund", "order_id": "ORD-1003"}}
     ).json()
-    regression = client.post(
-        "/run?variant=regression",
-        json={"input": {"action": "cancel", "order_id": "ORD-1002"}},
-    ).json()
-
     assert missing["output"]["status"] == "needs_order_id"
     assert prohibited["output"]["status"] == "blocked"
     assert [item["name"] for item in prohibited["tool_calls"]] == ["lookup_order"]
     assert refund["output"]["status"] == "refund_requested"
     assert [item["name"] for item in refund["tool_calls"]] == ["lookup_order", "request_refund"]
-    assert regression["output"]["status"] == "cancelled"

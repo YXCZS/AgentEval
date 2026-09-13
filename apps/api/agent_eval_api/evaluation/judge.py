@@ -1,43 +1,23 @@
-"""OpenAI-compatible LLM judge with validated, reproducible structured decisions."""
+"""Evaluation adapter for a user-managed external LLM Judge."""
 
 from __future__ import annotations
 
-import asyncio
-import json
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field, ValidationError
 
-from agent_eval_api.contracts import ScoreDirection, ScoreStatus
+from agent_eval_api.contracts import (
+    ExternalJudgeRequest,
+    ScoreDirection,
+    ScoreStatus,
+)
 
 from .base import EvaluationContext, EvaluatorConfigurationError, EvaluatorOutcome
-
-
-class JudgeDecision(BaseModel):
-    score: float
-    explanation: str = Field(min_length=1)
-    evidence: list[str] = Field(default_factory=list)
-    label: str | None = None
-
-
-class JudgeProviderError(RuntimeError):
-    def __init__(self, error_type: str, message: str, *, attempts: int = 1) -> None:
-        super().__init__(message)
-        self.error_type = error_type
-        self.attempts = attempts
-
-
-@dataclass(frozen=True)
-class JudgeProviderConfig:
-    endpoint: str
-    model: str
-    api_key: str | None = None
-    timeout_seconds: float = 60.0
-    max_retries: int = 2
-    retry_backoff_seconds: float = 0.2
-
+from .external_protocols import (
+    ExternalJudgeConfig,
+    ExternalProtocolError,
+    call_external_judge,
+)
 
 DEFAULT_RUBRICS = {
     "answer_quality": (
@@ -62,179 +42,126 @@ def _metric_key(name: str) -> str:
     return aliases.get(key, key)
 
 
-def _judge_payload(context: EvaluationContext, rubric: str) -> dict[str, Any]:
-    return {
-        "metric": context.evaluator.name,
-        "rubric": rubric,
-        "input": context.case.input,
-        "messages": [message.model_dump(mode="json") for message in context.case.messages],
-        "expected_output": context.case.expected_output,
-        "criteria": context.case.criteria,
-        "actual_output": context.execution.output,
-        "tool_calls": [call.model_dump(mode="json") for call in context.execution.tool_calls],
-    }
+def _rubric(context: EvaluationContext) -> str:
+    key = _metric_key(context.evaluator.name)
+    configured = context.evaluator.rubric
+    if configured:
+        return configured
+    if key in {"instruction_following", "natural_language_rules"} and not context.case.criteria:
+        raise EvaluatorConfigurationError("criteria or an evaluator rubric is required")
+    return DEFAULT_RUBRICS.get(
+        key,
+        "Evaluate the actual Agent result against the input, expected output, and criteria. "
+        "Return a score supported by concise evidence.",
+    )
 
 
-def _extract_decision(body: Any) -> JudgeDecision:
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise JudgeProviderError(
-            "protocol_error", "judge response is missing message content"
-        ) from exc
-    if isinstance(content, str):
-        stripped = content.strip()
-        if stripped.startswith("```json") and stripped.endswith("```"):
-            stripped = stripped[7:-3].strip()
-        try:
-            content = json.loads(stripped)
-        except json.JSONDecodeError as exc:
-            raise JudgeProviderError("protocol_error", "judge content is not valid JSON") from exc
-    try:
-        return JudgeDecision.model_validate(content)
-    except ValidationError as exc:
-        raise JudgeProviderError("protocol_error", "judge decision has an invalid schema") from exc
+def _trace_payload(context: EvaluationContext) -> dict[str, Any] | None:
+    if context.trace is None:
+        return None
+    return context.trace.model_dump(mode="json", exclude_none=True)
 
 
-async def _request_decision(
-    provider: JudgeProviderConfig,
-    payload: dict[str, Any],
-    *,
-    client: httpx.AsyncClient | None,
-) -> tuple[JudgeDecision, dict[str, Any], int]:
-    headers = {"Content-Type": "application/json"}
-    if provider.api_key:
-        headers["Authorization"] = f"Bearer {provider.api_key}"
-    request_body = {
-        "model": provider.model,
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a strict evaluation judge. Return only JSON with numeric score, "
-                    "non-empty explanation, evidence string array, and optional label."
-                ),
-            },
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ],
-    }
-    owns_client = client is None
-    http_client = client or httpx.AsyncClient(timeout=provider.timeout_seconds)
-    attempt = 0
-    try:
-        while True:
-            try:
-                response = await http_client.post(
-                    provider.endpoint,
-                    headers=headers,
-                    json=request_body,
-                )
-                if response.status_code == 429:
-                    raise JudgeProviderError(
-                        "rate_limit", "judge provider rate limited the request"
-                    )
-                if response.status_code >= 500:
-                    raise JudgeProviderError(
-                        "service_error", f"judge provider returned HTTP {response.status_code}"
-                    )
-                response.raise_for_status()
-                body = response.json()
-                return _extract_decision(body), body, attempt + 1
-            except JudgeProviderError as exc:
-                if exc.error_type == "protocol_error" or attempt >= provider.max_retries:
-                    raise JudgeProviderError(
-                        exc.error_type, str(exc), attempts=attempt + 1
-                    ) from exc
-            except httpx.TimeoutException as exc:
-                if attempt >= provider.max_retries:
-                    raise JudgeProviderError(
-                        "timeout", "judge request timed out", attempts=attempt + 1
-                    ) from exc
-            except httpx.HTTPStatusError as exc:
-                raise JudgeProviderError(
-                    "provider_error",
-                    f"judge request failed: HTTP {exc.response.status_code}",
-                    attempts=attempt + 1,
-                ) from exc
-            except httpx.HTTPError as exc:
-                if attempt >= provider.max_retries:
-                    raise JudgeProviderError(
-                        "connection_error",
-                        "judge request could not be completed",
-                        attempts=attempt + 1,
-                    ) from exc
-            except ValueError as exc:
-                raise JudgeProviderError(
-                    "protocol_error",
-                    "judge response is not valid JSON",
-                    attempts=attempt + 1,
-                ) from exc
-            await asyncio.sleep(provider.retry_backoff_seconds * (2**attempt))
-            attempt += 1
-    finally:
-        if owns_client:
-            await http_client.aclose()
+def _request(context: EvaluationContext, rubric: str) -> ExternalJudgeRequest:
+    return ExternalJudgeRequest(
+        run_id=context.execution.run_id,
+        case_id=context.execution.case_id,
+        trace_id=context.execution.trace_id,
+        metric_name=context.evaluator.name,
+        evaluator_version=f"{context.evaluator.name}@{context.evaluator.version}",
+        rubric=rubric,
+        input=context.case.input,
+        expected_output=context.case.expected_output,
+        actual_output=context.execution.output,
+        criteria=context.case.criteria,
+        tool_calls=list(context.execution.tool_calls),
+        trace=_trace_payload(context),
+        metadata={
+            "source": "offline-experiment",
+            "agent_type": context.evaluator.supported_agent_types[0].value,
+        },
+    )
 
 
-def _validate_score(context: EvaluationContext, score: float) -> None:
-    minimum = context.evaluator.score_min
-    maximum = context.evaluator.score_max
-    if minimum is not None and score < minimum:
-        raise JudgeProviderError("protocol_error", "judge score is below evaluator score_min")
-    if maximum is not None and score > maximum:
-        raise JudgeProviderError("protocol_error", "judge score is above evaluator score_max")
+def _passed(context: EvaluationContext, score: float, explicit: bool | None) -> bool | None:
+    if explicit is not None:
+        return explicit
+    threshold = context.evaluator.default_threshold
+    if threshold is None:
+        return None
+    if context.evaluator.direction is ScoreDirection.LOWER_IS_BETTER:
+        return score <= threshold
+    return score >= threshold
 
 
 async def evaluate_llm_judge(
     context: EvaluationContext,
-    provider: JudgeProviderConfig,
+    config: ExternalJudgeConfig,
     *,
+    signing_secret: str,
     client: httpx.AsyncClient | None = None,
 ) -> list[EvaluatorOutcome]:
-    key = _metric_key(context.evaluator.name)
-    default_rubric = DEFAULT_RUBRICS.get(key)
-    if default_rubric is None:
-        raise EvaluatorConfigurationError(f"unknown LLM judge evaluator: {context.evaluator.name}")
-    rubric = context.evaluator.rubric or default_rubric
-    if key in {"instruction_following", "natural_language_rules"} and not (
-        context.case.criteria or context.evaluator.rubric
-    ):
-        return [
-            EvaluatorOutcome(
-                metric_name=context.evaluator.name,
-                status=ScoreStatus.MISSING,
-                explanation="criteria or an evaluator rubric is required",
-            )
-        ]
-    payload = _judge_payload(context, rubric)
-    decision, raw_response, attempts = await _request_decision(
-        provider, payload, client=client
+    """Call the external Judge protocol and normalize its response.
+
+    The signing secret is deliberately an invocation-only argument. It is never
+    read from platform model settings and is not included in the returned raw
+    result.
+    """
+
+    rubric = _rubric(context)
+    result = await call_external_judge(
+        config,
+        _request(context, rubric),
+        signing_secret=signing_secret,
+        client=client,
     )
-    _validate_score(context, decision.score)
-    threshold = context.evaluator.default_threshold
-    if threshold is None:
-        raise EvaluatorConfigurationError("LLM judge requires default_threshold")
-    if context.evaluator.direction is ScoreDirection.LOWER_IS_BETTER:
-        passed = decision.score <= threshold
+    response = result.response
+    provenance = response.provenance.model_copy(
+        update={
+            "source": "external_judge",
+            "protocol": "signed_http_json_v1",
+            "connection_id": config.connection_id,
+        }
+    )
+    minimum = context.evaluator.score_min
+    maximum = context.evaluator.score_max
+    if minimum is not None and response.score < minimum:
+        raise ExternalProtocolError(
+            "protocol_error", "external Judge score is below evaluator score_min"
+        )
+    if maximum is not None and response.score > maximum:
+        raise ExternalProtocolError(
+            "protocol_error", "external Judge score is above evaluator score_max"
+        )
+
+    passed = _passed(context, response.score, response.passed)
+    explanation = response.explanation
+    if passed is None:
+        status = ScoreStatus.MISSING
+        explanation = (
+            f"{explanation} (Judge did not return passed and no evaluator threshold is configured)"
+        )
     else:
-        passed = decision.score >= threshold
+        status = ScoreStatus.PASSED if passed else ScoreStatus.FAILED
+
     return [
         EvaluatorOutcome(
             metric_name=context.evaluator.name,
-            status=ScoreStatus.PASSED if passed else ScoreStatus.FAILED,
-            value=decision.score,
-            label=decision.label,
+            status=status,
+            value=response.score,
+            label=response.label,
             passed=passed,
-            explanation=decision.explanation,
-            evidence=[{"statement": item} for item in decision.evidence],
+            explanation=explanation,
+            evidence=list(response.evidence),
+            provenance=provenance,
+            raw_response=result.raw_response,
             raw_result={
-                "provider": "openai-compatible",
-                "model": provider.model,
-                "rubric": rubric,
-                "attempts": attempts,
-                "response": raw_response,
+                "protocol": "signed_http_json_v1",
+                "attempts": result.attempts,
+                "response": response.model_copy(
+                    update={"provenance": provenance}
+                ).model_dump(mode="json"),
+                "raw_response": result.raw_response,
             },
         )
     ]

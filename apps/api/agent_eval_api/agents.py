@@ -1,9 +1,6 @@
-"""Project-scoped Agent registration and version endpoints."""
+"""Endpoint-independent Agent Releases and one-way legacy HTTP migration."""
 
 from __future__ import annotations
-
-import time
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
@@ -11,20 +8,25 @@ from sqlalchemy.orm import Session
 
 from agent_eval_api.auth import AuthContext, get_db, require_project_access
 from agent_eval_api.contracts import (
-    AgentConnectionTestRequest,
-    AgentConnectionTestResponse,
-    AgentCreateRequest,
-    AgentResponse,
+    AgentReleaseRegistrationRequest,
+    AgentReleaseResponse,
     AgentType,
-    AgentVersionCreateRequest,
-    AgentVersionResponse,
-    EndpointConfig,
-    PromptConfig,
+    LegacyHttpAgentMigrationRequest,
+    LegacyHttpAgentMigrationResponse,
+    RemoteTriggerCreated,
 )
-from agent_eval_api.db import AgentRecord, AgentVersionRecord, ProjectRecord, new_id
-from agent_eval_api.runner import AgentAdapterError, PromptRunnerError, run_http_agent, run_prompt
+from agent_eval_api.db import AgentVersionRecord, DatasetRecord, ProjectRecord, new_id
+from agent_eval_api.remote_triggers import create_remote_trigger_record, public_trigger
+from agent_eval_api.settings import Settings, get_settings
 
-router = APIRouter(prefix="/projects/{project_id}/agents", tags=["agents"])
+releases_router = APIRouter(
+    prefix="/projects/{project_id}/agent-releases",
+    tags=["agent-releases"],
+)
+migrations_router = APIRouter(
+    prefix="/projects/{project_id}/legacy-http-agent-migrations",
+    tags=["legacy-migrations"],
+)
 
 
 def get_project(db: Session, project_id: str) -> ProjectRecord:
@@ -34,264 +36,181 @@ def get_project(db: Session, project_id: str) -> ProjectRecord:
     return project
 
 
-def get_agent(db: Session, project_id: str, agent_id: str) -> AgentRecord:
-    agent = db.scalar(
-        select(AgentRecord).where(
-            AgentRecord.id == agent_id,
-            AgentRecord.project_id == project_id,
+def release_response(release: AgentVersionRecord) -> AgentReleaseResponse:
+    """Never expose historical transport configuration through Release APIs."""
+
+    return AgentReleaseResponse(
+        id=release.id,
+        project_id=release.project_id,
+        version=release.version,
+        label=release.label,
+        agent_type=AgentType(release.agent_type),
+        release_identity=release.release_identity,
+        source_revision=release.source_revision,
+        metadata=release.metadata_json,
+        enabled=release.enabled,
+        created_at=release.created_at,
+    )
+
+
+def _require_browser(auth: AuthContext) -> None:
+    if auth.principal_type != "browser":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="browser session required to migrate legacy HTTP Agent configurations",
+        )
+
+
+def _next_endpoint_independent_version(db: Session, project_id: str) -> int:
+    latest = db.scalar(
+        select(func.max(AgentVersionRecord.version)).where(
+            AgentVersionRecord.project_id == project_id,
+            AgentVersionRecord.agent_id.is_(None),
         )
     )
-    if agent is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent not found")
-    return agent
+    return (latest or 0) + 1
 
 
-def version_response(version: AgentVersionRecord) -> AgentVersionResponse:
-    return AgentVersionResponse(
-        id=version.id,
-        agent_id=version.agent_id,
-        version=version.version,
-        label=version.label,
-        agent_type=AgentType(version.agent_type),
-        prompt_config=(
-            PromptConfig.model_validate(version.prompt_config) if version.prompt_config else None
-        ),
-        endpoint_config=(
-            EndpointConfig.model_validate(version.endpoint_config)
-            if version.endpoint_config
-            else None
-        ),
-        enabled=version.enabled,
-        created_at=version.created_at,
-    )
-
-
-def agent_response(agent: AgentRecord) -> AgentResponse:
-    current_version_id = (
-        max(agent.versions, key=lambda item: item.version).id if agent.versions else None
-    )
-    return AgentResponse(
-        id=agent.id,
-        project_id=agent.project_id,
-        name=agent.name,
-        agent_type=AgentType(agent.agent_type),
-        description=agent.description,
-        active=agent.active,
-        current_version_id=current_version_id,
-        created_at=agent.created_at,
-        updated_at=agent.updated_at,
-    )
-
-
-@router.post("/connection-test", response_model=AgentConnectionTestResponse)
-async def test_agent_connection(
+@releases_router.post(
+    "",
+    response_model=AgentReleaseResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register_agent_release(
     project_id: str,
-    payload: AgentConnectionTestRequest,
+    payload: AgentReleaseRegistrationRequest,
     db: Session = Depends(get_db),  # noqa: B008
     _: AuthContext = Depends(require_project_access),  # noqa: B008
-) -> AgentConnectionTestResponse:
-    """Run one bounded request without persisting a trace or agent version."""
+) -> AgentReleaseResponse:
+    """Register a release identity for SDK, OTel, Remote Upload, or Trigger."""
 
     get_project(db, project_id)
-    started = time.perf_counter()
-    try:
-        if payload.agent_type is AgentType.PROMPT:
-            assert payload.prompt_config is not None
-            result = await run_prompt(
-                payload.prompt_config,
-                payload.variables,
-                input_messages=[message.model_dump(mode="json") for message in payload.messages]
-                or None,
-            )
-            return AgentConnectionTestResponse(
-                success=True,
-                message="Prompt provider responded successfully",
-                latency_ms=(time.perf_counter() - started) * 1000,
-                output=result.output,
-                rendered_prompt=result.rendered_prompt,
-                usage={
-                    "input_tokens": result.usage.input_tokens,
-                    "output_tokens": result.usage.output_tokens,
-                    "total_tokens": result.usage.total_tokens,
-                    "cost": result.usage.cost,
-                },
-            )
-
-        assert payload.endpoint_config is not None
-        http_result = await run_http_agent(
-            payload.endpoint_config,
-            payload.input,
-            variables=payload.variables,
-            messages=[message.model_dump(mode="json") for message in payload.messages] or None,
-            run_id="connection-test",
-            case_id="connection-test",
-            trace_id=f"connection-test-{uuid4().hex}",
-        )
-        return AgentConnectionTestResponse(
-            success=True,
-            message="Agent endpoint responded successfully",
-            latency_ms=(time.perf_counter() - started) * 1000,
-            output=http_result.output,
-            usage=http_result.usage,
-        )
-    except PromptRunnerError as exc:
-        return AgentConnectionTestResponse(
-            success=False,
-            message=str(exc),
-            error_type=exc.error_type,
-            latency_ms=(time.perf_counter() - started) * 1000,
-        )
-    except AgentAdapterError as exc:
-        return AgentConnectionTestResponse(
-            success=False,
-            message=str(exc),
-            error_type=exc.error_type,
-            latency_ms=(time.perf_counter() - started) * 1000,
-        )
-
-
-@router.post("", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
-def create_agent(
-    project_id: str,
-    payload: AgentCreateRequest,
-    db: Session = Depends(get_db),  # noqa: B008
-    _: AuthContext = Depends(require_project_access),  # noqa: B008
-) -> AgentResponse:
-    get_project(db, project_id)
-    agent = AgentRecord(
+    release = AgentVersionRecord(
         id=new_id(),
         project_id=project_id,
-        name=payload.name,
+        agent_id=None,
+        version=_next_endpoint_independent_version(db, project_id),
+        label=payload.label,
         agent_type=payload.agent_type.value,
-        description=payload.description,
+        release_identity=payload.release_identity,
+        source_revision=payload.source_revision,
+        metadata_json=payload.metadata,
+        endpoint_config=None,
     )
-    version = AgentVersionRecord(
-        id=new_id(),
-        agent=agent,
-        version=1,
-        label=payload.name + " v1",
-        agent_type=payload.agent_type.value,
-        prompt_config=payload.prompt_config.model_dump(mode="json")
-        if payload.prompt_config
-        else None,
-        endpoint_config=payload.endpoint_config.model_dump(mode="json")
-        if payload.endpoint_config
-        else None,
-    )
-    db.add_all([agent, version])
+    db.add(release)
     db.commit()
-    db.refresh(agent)
-    return agent_response(agent)
+    db.refresh(release)
+    return release_response(release)
 
 
-@router.get("", response_model=list[AgentResponse])
-def list_agents(
+@releases_router.get("", response_model=list[AgentReleaseResponse])
+def list_project_agent_releases(
     project_id: str,
     db: Session = Depends(get_db),  # noqa: B008
     _: AuthContext = Depends(require_project_access),  # noqa: B008
-) -> list[AgentResponse]:
+) -> list[AgentReleaseResponse]:
     get_project(db, project_id)
-    agents = db.scalars(select(AgentRecord).where(AgentRecord.project_id == project_id)).all()
-    return [agent_response(agent) for agent in agents]
-
-
-@router.get("/{agent_id}", response_model=AgentResponse)
-def read_agent(
-    project_id: str,
-    agent_id: str,
-    db: Session = Depends(get_db),  # noqa: B008
-    _: AuthContext = Depends(require_project_access),  # noqa: B008
-) -> AgentResponse:
-    return agent_response(get_agent(db, project_id, agent_id))
-
-
-@router.post(
-    "/{agent_id}/versions", response_model=AgentVersionResponse, status_code=status.HTTP_201_CREATED
-)
-def create_agent_version(
-    project_id: str,
-    agent_id: str,
-    payload: AgentVersionCreateRequest,
-    db: Session = Depends(get_db),  # noqa: B008
-    _: AuthContext = Depends(require_project_access),  # noqa: B008
-) -> AgentVersionResponse:
-    agent = get_agent(db, project_id, agent_id)
-    if payload.agent_type.value != agent.agent_type:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="agent type cannot change"
-        )
-    latest = db.scalar(
-        select(func.max(AgentVersionRecord.version)).where(AgentVersionRecord.agent_id == agent.id)
-    )
-    version = AgentVersionRecord(
-        id=new_id(),
-        agent=agent,
-        version=(latest or 0) + 1,
-        label=payload.label or f"{agent.name} v{(latest or 0) + 1}",
-        agent_type=agent.agent_type,
-        prompt_config=payload.prompt_config.model_dump(mode="json")
-        if payload.prompt_config
-        else None,
-        endpoint_config=payload.endpoint_config.model_dump(mode="json")
-        if payload.endpoint_config
-        else None,
-    )
-    db.add(version)
-    db.commit()
-    db.refresh(version)
-    return version_response(version)
-
-
-@router.get("/{agent_id}/versions", response_model=list[AgentVersionResponse])
-def list_agent_versions(
-    project_id: str,
-    agent_id: str,
-    db: Session = Depends(get_db),  # noqa: B008
-    _: AuthContext = Depends(require_project_access),  # noqa: B008
-) -> list[AgentVersionResponse]:
-    agent = get_agent(db, project_id, agent_id)
-    versions = db.scalars(
+    releases = db.scalars(
         select(AgentVersionRecord)
-        .where(AgentVersionRecord.agent_id == agent.id)
-        .order_by(AgentVersionRecord.version)
+        .where(
+            AgentVersionRecord.project_id == project_id,
+            AgentVersionRecord.agent_id.is_(None),
+        )
+        .order_by(AgentVersionRecord.created_at.desc())
     ).all()
-    return [version_response(version) for version in versions]
+    # SQLite JSON stores Python ``None`` as JSON ``null``, which does not
+    # satisfy SQL ``IS NULL``. Filter after decoding to keep both backends aligned.
+    return [release_response(release) for release in releases if release.endpoint_config is None]
 
 
-@router.patch("/{agent_id}/versions/{version_id}/enabled", response_model=AgentVersionResponse)
-def set_agent_version_enabled(
+@migrations_router.post(
+    "",
+    response_model=LegacyHttpAgentMigrationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def migrate_legacy_http_agent_release(
     project_id: str,
-    agent_id: str,
-    version_id: str,
-    enabled: bool,
+    payload: LegacyHttpAgentMigrationRequest,
     db: Session = Depends(get_db),  # noqa: B008
-    _: AuthContext = Depends(require_project_access),  # noqa: B008
-) -> AgentVersionResponse:
-    agent = get_agent(db, project_id, agent_id)
-    version = db.scalar(
+    auth: AuthContext = Depends(require_project_access),  # noqa: B008
+    settings: Settings = Depends(get_settings),  # noqa: B008
+) -> LegacyHttpAgentMigrationResponse:
+    """Create a supported release without copying a historical endpoint or auth ref."""
+
+    _require_browser(auth)
+    get_project(db, project_id)
+    legacy = db.scalar(
         select(AgentVersionRecord).where(
-            AgentVersionRecord.id == version_id,
-            AgentVersionRecord.agent_id == agent.id,
+            AgentVersionRecord.id == payload.legacy_agent_version_id,
+            AgentVersionRecord.project_id == project_id,
+            AgentVersionRecord.agent_id.is_not(None),
+            AgentVersionRecord.endpoint_config.is_not(None),
         )
     )
-    if version is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent version not found")
-    version.enabled = enabled
+    if legacy is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="legacy HTTP Agent release not found",
+        )
+    dataset = db.scalar(
+        select(DatasetRecord).where(
+            DatasetRecord.id == payload.dataset_id,
+            DatasetRecord.project_id == project_id,
+        )
+    )
+    if dataset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="dataset not found")
+
+    trigger_created: RemoteTriggerCreated | None = None
+    if payload.target_mode == "remote_trigger":
+        # The helper checks for an existing trigger before this transaction adds a Release.
+        trigger, signing_secret = create_remote_trigger_record(
+            db=db,
+            settings=settings,
+            project_id=project_id,
+            dataset_id=dataset.id,
+            trigger_url=str(payload.trigger_url),
+        )
+        trigger_created = RemoteTriggerCreated(
+            **public_trigger(trigger).model_dump(),
+            signing_secret=signing_secret,
+        )
+
+    release = AgentVersionRecord(
+        id=new_id(),
+        project_id=project_id,
+        agent_id=None,
+        version=_next_endpoint_independent_version(db, project_id),
+        label=_migrated_label(legacy.label),
+        agent_type=legacy.agent_type,
+        release_identity=legacy.release_identity,
+        source_revision=legacy.source_revision,
+        metadata_json={
+            "migration": {
+                "source_legacy_agent_version_id": legacy.id,
+                "target_mode": payload.target_mode,
+            }
+        },
+        endpoint_config=None,
+        enabled=legacy.enabled,
+    )
+    db.add(release)
     db.commit()
-    db.refresh(version)
-    return version_response(version)
+    db.refresh(release)
+    if trigger_created is not None:
+        db.refresh(trigger)
+        trigger_created = RemoteTriggerCreated(
+            **public_trigger(trigger).model_dump(),
+            signing_secret=trigger_created.signing_secret,
+        )
+    return LegacyHttpAgentMigrationResponse(
+        release=release_response(release),
+        trigger=trigger_created,
+    )
 
 
-@router.patch("/{agent_id}/active", response_model=AgentResponse)
-def set_agent_active(
-    project_id: str,
-    agent_id: str,
-    active: bool,
-    db: Session = Depends(get_db),  # noqa: B008
-    _: AuthContext = Depends(require_project_access),  # noqa: B008
-) -> AgentResponse:
-    agent = get_agent(db, project_id, agent_id)
-    agent.active = active
-    db.commit()
-    db.refresh(agent)
-    return agent_response(agent)
+def _migrated_label(label: str) -> str:
+    """Preserve the migration marker without violating the public label limit."""
+
+    suffix = " (migrated)"
+    return f"{label[: 100 - len(suffix)]}{suffix}"

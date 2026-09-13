@@ -5,14 +5,15 @@ from pydantic import ValidationError
 
 from agent_eval_api.contracts import (
     AgentType,
-    AgentVersion,
     DatasetCase,
     DatasetVersion,
-    EndpointConfig,
     EvaluationRun,
+    EvaluationRunCreateRequest,
     EvaluatorType,
     EvaluatorVersion,
-    PromptConfig,
+    EvidencePolicy,
+    ExperimentExecutionMode,
+    ExperimentItemAttempt,
     Score,
     ScoreDirection,
     ScoreStatus,
@@ -24,48 +25,9 @@ from agent_eval_api.contracts import (
 NOW = datetime.now(UTC)
 
 
-def prompt_config() -> PromptConfig:
-    return PromptConfig(
-        provider="mock",
-        model="mock-model",
-        endpoint="https://llm.example.test/v1/chat/completions",
-        user_template="Answer: {question}",
-        variable_names=["question"],
-    )
-
-
-def endpoint_config() -> EndpointConfig:
-    return EndpointConfig(url="https://agent.example.test/run", auth_ref="project-agent-key")
-
-
 @pytest.mark.parametrize("agent_type", list(AgentType))
 def test_all_agent_types_are_stable(agent_type: AgentType) -> None:
-    config = prompt_config() if agent_type is AgentType.PROMPT else endpoint_config()
-    version = AgentVersion(
-        id=f"agent-version-{agent_type}",
-        agent_id="agent-1",
-        version=1,
-        label="v1",
-        agent_type=agent_type,
-        prompt_config=config if agent_type is AgentType.PROMPT else None,
-        endpoint_config=config if agent_type is not AgentType.PROMPT else None,
-        created_at=NOW,
-    )
-
-    assert version.agent_type is agent_type
-
-
-def test_agent_version_rejects_mismatched_execution_config() -> None:
-    with pytest.raises(ValidationError, match="prompt agents require prompt_config only"):
-        AgentVersion(
-            id="agent-version-1",
-            agent_id="agent-1",
-            version=1,
-            label="v1",
-            agent_type="prompt",
-            endpoint_config=endpoint_config(),
-            created_at=NOW,
-        )
+    assert agent_type in {AgentType.RAG, AgentType.TOOL, AgentType.CUSTOM}
 
 
 def test_dataset_case_keeps_structured_agent_expectations() -> None:
@@ -102,15 +64,6 @@ def test_dataset_version_rejects_duplicate_case_ids() -> None:
 def test_invalid_enum_and_missing_required_fields_are_rejected() -> None:
     with pytest.raises(ValidationError):
         DatasetCase(id="case-1")
-    with pytest.raises(ValidationError):
-        AgentVersion(
-            id="agent-version-1",
-            agent_id="agent-1",
-            version=1,
-            label="v1",
-            agent_type="browser",
-            created_at=NOW,
-        )
 
 
 def test_run_rejects_inconsistent_case_counts() -> None:
@@ -123,6 +76,73 @@ def test_run_rejects_inconsistent_case_counts() -> None:
             total_cases=1,
             completed_cases=1,
             failed_cases=1,
+            created_at=NOW,
+        )
+
+
+@pytest.mark.parametrize("mode", list(ExperimentExecutionMode))
+@pytest.mark.parametrize("policy", list(EvidencePolicy))
+def test_production_experiment_modes_and_evidence_policies_are_stable(
+    mode: ExperimentExecutionMode,
+    policy: EvidencePolicy,
+) -> None:
+    request = EvaluationRunCreateRequest(
+        agent_version_id="release-1",
+        dataset_version_id="dataset-version-1",
+        evaluator_version_ids=["evaluator-1"],
+        execution_mode=mode,
+        evidence_policy=policy,
+    )
+
+    assert request.execution_mode is mode
+    assert request.evidence_policy is policy
+
+
+@pytest.mark.parametrize("removed_mode", ["prompt", "demo", "mock", "managed_prompt"])
+def test_removed_experiment_modes_are_rejected(removed_mode: str) -> None:
+    with pytest.raises(ValidationError):
+        EvaluationRunCreateRequest(
+            agent_version_id="release-1",
+            dataset_version_id="dataset-version-1",
+            evaluator_version_ids=["evaluator-1"],
+            execution_mode=removed_mode,
+        )
+
+
+def test_experiment_item_attempt_contract_preserves_runtime_evidence() -> None:
+    item = ExperimentItemAttempt(
+        id="item-1",
+        experiment_id="experiment-1",
+        case_id="case-1",
+        repetition=1,
+        attempt=2,
+        external_run_id="sdk-process-42",
+        status="completed",
+        output={"answer": "done"},
+        usage={"input_tokens": 8, "output_tokens": 2},
+        runtime_metadata={"runtime": "python", "sdk_version": "0.1.0"},
+        created_at=NOW,
+        started_at=NOW,
+        finished_at=NOW,
+    )
+
+    assert item.external_run_id == "sdk-process-42"
+    assert item.usage["input_tokens"] == 8
+
+
+@pytest.mark.parametrize(("repetition", "attempt"), [(0, 1), (1, 0)])
+def test_experiment_item_attempt_indices_are_positive(
+    repetition: int,
+    attempt: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        ExperimentItemAttempt(
+            id="item-1",
+            experiment_id="experiment-1",
+            case_id="case-1",
+            repetition=repetition,
+            attempt=attempt,
+            external_run_id="sdk-process-42",
             created_at=NOW,
         )
 
@@ -168,6 +188,8 @@ def test_trace_requires_matching_span_trace_ids_and_preserves_extensions() -> No
                 name="chat.completions",
                 status="completed",
                 started_at=NOW,
+                usage={"input_tokens": 4},
+                cost=0.001,
                 extensions={"gen_ai.request.temperature": 0.2},
             )
         ],

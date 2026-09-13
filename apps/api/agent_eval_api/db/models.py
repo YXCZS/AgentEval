@@ -14,11 +14,13 @@ from uuid import uuid4
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -58,10 +60,19 @@ class ProjectRecord(Base):
     agents: Mapped[list[AgentRecord]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
+    agent_releases: Mapped[list[AgentVersionRecord]] = relationship(
+        back_populates="project"
+    )
     datasets: Mapped[list[DatasetRecord]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
     evaluators: Mapped[list[EvaluatorVersionRecord]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+    evaluator_connections: Mapped[list[EvaluatorConnectionRecord]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+    provider_connections: Mapped[list[ProviderConnectionRecord]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
     traces: Mapped[list[TraceRecord]] = relationship(
@@ -119,23 +130,32 @@ class AgentVersionRecord(Base):
     __table_args__ = (
         UniqueConstraint("agent_id", "version", name="uq_agent_versions_agent_version"),
         Index("ix_agent_versions_agent_enabled", "agent_id", "enabled"),
+        Index("ix_agent_versions_project_created", "project_id", "created_at"),
     )
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True, default=new_id)
-    agent_id: Mapped[str] = mapped_column(
-        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    agent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     label: Mapped[str] = mapped_column(String(100), nullable=False)
     agent_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    prompt_config: Mapped[dict[str, Any] | None] = mapped_column(JsonType)
+    release_identity: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_revision: Mapped[str | None] = mapped_column(String(200))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JsonType, default=dict, nullable=False
+    )
     endpoint_config: Mapped[dict[str, Any] | None] = mapped_column(JsonType)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
 
-    agent: Mapped[AgentRecord] = relationship(back_populates="versions")
+    agent: Mapped[AgentRecord | None] = relationship(back_populates="versions")
+    project: Mapped[ProjectRecord] = relationship(back_populates="agent_releases")
     runs: Mapped[list[EvaluationRunRecord]] = relationship(back_populates="agent_version")
 
 
@@ -167,6 +187,87 @@ class DatasetRecord(Base):
     current_version: Mapped[DatasetVersionRecord | None] = relationship(
         foreign_keys=[current_version_id], post_update=True
     )
+    remote_trigger: Mapped[RemoteTriggerRecord | None] = relationship(
+        back_populates="dataset", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class RemoteTriggerRecord(Base):
+    """Dataset-scoped remote runner configuration and encrypted signing secret."""
+
+    __tablename__ = "remote_triggers"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", name="uq_remote_triggers_dataset"),
+        Index("ix_remote_triggers_project_enabled", "project_id", "enabled"),
+    )
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    dataset_id: Mapped[str] = mapped_column(
+        ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
+    )
+    trigger_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    signature_header: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="X-Agent-Eval-Trigger-Signature"
+    )
+    secret_mask: Mapped[str] = mapped_column(String(64), nullable=False)
+    secret_key_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    secret_ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    secret_nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    project: Mapped[ProjectRecord] = relationship()
+    dataset: Mapped[DatasetRecord] = relationship(back_populates="remote_trigger")
+    deliveries: Mapped[list[RemoteTriggerDeliveryRecord]] = relationship(
+        back_populates="trigger", cascade="all, delete-orphan"
+    )
+
+
+class RemoteTriggerDeliveryRecord(Base):
+    """A durable webhook delivery, separate from the remote Experiment itself."""
+
+    __tablename__ = "remote_trigger_deliveries"
+    __table_args__ = (
+        UniqueConstraint("delivery_id", name="uq_remote_trigger_deliveries_delivery_id"),
+        UniqueConstraint("experiment_id", name="uq_remote_trigger_deliveries_experiment"),
+        Index("ix_remote_trigger_deliveries_trigger_created", "trigger_id", "created_at"),
+        CheckConstraint(
+            "status IN ('pending', 'delivering', 'accepted', 'rejected', 'failed')",
+            name="ck_remote_trigger_delivery_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True, default=new_id)
+    trigger_id: Mapped[str] = mapped_column(
+        ForeignKey("remote_triggers.id", ondelete="CASCADE"), nullable=False
+    )
+    experiment_id: Mapped[str] = mapped_column(
+        ForeignKey("evaluation_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    delivery_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_http_status: Mapped[int | None] = mapped_column(Integer)
+    last_error_type: Mapped[str | None] = mapped_column(String(64))
+    last_error_message: Mapped[str | None] = mapped_column(String(200))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    trigger: Mapped[RemoteTriggerRecord] = relationship(back_populates="deliveries")
+    experiment: Mapped[EvaluationRunRecord] = relationship(back_populates="trigger_deliveries")
 
 
 class DatasetVersionRecord(Base):
@@ -226,9 +327,14 @@ class DatasetCaseRecord(Base):
         "metadata", JsonType, default=dict, nullable=False
     )
     source_trace_id: Mapped[str | None] = mapped_column(String(128))
+    source_span_ids: Mapped[list[str]] = mapped_column(JsonType, default=list, nullable=False)
+    source_mapping: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict, nullable=False)
 
     dataset_version: Mapped[DatasetVersionRecord] = relationship(back_populates="cases")
     executions: Mapped[list[CaseExecutionRecord]] = relationship(back_populates="dataset_case")
+    experiment_items: Mapped[list[ExperimentItemAttemptRecord]] = relationship(
+        back_populates="dataset_case"
+    )
 
 
 class EvaluatorVersionRecord(Base):
@@ -257,7 +363,16 @@ class EvaluatorVersionRecord(Base):
     direction: Mapped[str] = mapped_column(String(32), nullable=False)
     default_threshold: Mapped[float | None] = mapped_column(Float)
     rubric: Mapped[str | None] = mapped_column(Text)
+    evaluator_connection_id: Mapped[str | None] = mapped_column(
+        ForeignKey("evaluator_connections.id")
+    )
+    provider_connection_id: Mapped[str | None] = mapped_column(
+        ForeignKey("provider_connections.id")
+    )
     judge_model: Mapped[str | None] = mapped_column(String(200))
+    prompt_template: Mapped[str | None] = mapped_column(Text)
+    output_schema: Mapped[dict[str, Any] | None] = mapped_column(JsonType)
+    sampling_parameters: Mapped[dict[str, Any] | None] = mapped_column(JsonType)
     config: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -265,6 +380,73 @@ class EvaluatorVersionRecord(Base):
     )
 
     project: Mapped[ProjectRecord] = relationship(back_populates="evaluators")
+    evaluator_connection: Mapped[EvaluatorConnectionRecord | None] = relationship()
+    provider_connection: Mapped[ProviderConnectionRecord | None] = relationship()
+
+
+class EvaluatorConnectionRecord(Base):
+    __tablename__ = "evaluator_connections"
+    __table_args__ = (Index("ix_evaluator_connections_project", "project_id"),)
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(500), nullable=False)
+    auth_ref: Mapped[str | None] = mapped_column(String(200))
+    timeout_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=60.0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    project: Mapped[ProjectRecord] = relationship(back_populates="evaluator_connections")
+
+
+class ProviderConnectionRecord(Base):
+    """Encrypted model credentials used only by platform-managed evaluators."""
+
+    __tablename__ = "provider_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "name", name="uq_provider_connections_project_name"
+        ),
+        Index("ix_provider_connections_project_status", "project_id", "status"),
+        CheckConstraint(
+            "status IN ('pending_validation', 'active', 'error', 'disabled')",
+            name="ck_provider_connections_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    default_parameters: Mapped[dict[str, Any]] = mapped_column(
+        JsonType, default=dict, nullable=False
+    )
+    credential_mask: Mapped[str] = mapped_column(String(64), nullable=False)
+    credential_key_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    credential_ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    credential_nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending_validation"
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+    tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    project: Mapped[ProjectRecord] = relationship(back_populates="provider_connections")
 
 
 class EvaluationRunRecord(Base):
@@ -272,15 +454,34 @@ class EvaluationRunRecord(Base):
     __table_args__ = (
         Index("ix_evaluation_runs_project_created", "project_id", "created_at"),
         Index("ix_evaluation_runs_status", "status"),
+        CheckConstraint(
+            "execution_mode IN ('sdk_task', 'otel', 'remote_upload', 'remote_trigger')",
+            name="ck_evaluation_runs_execution_mode",
+        ),
+        CheckConstraint(
+            "evidence_policy IN ('trace_required', 'llm_required', "
+            "'tool_trajectory_required', 'rag_trajectory_required')",
+            name="ck_evaluation_runs_evidence_policy",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True, default=new_id)
     project_id: Mapped[str] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
+    name: Mapped[str] = mapped_column(String(200), nullable=False, default="Experiment")
     agent_version_id: Mapped[str] = mapped_column(ForeignKey("agent_versions.id"), nullable=False)
     dataset_version_id: Mapped[str] = mapped_column(
         ForeignKey("dataset_versions.id"), nullable=False
+    )
+    baseline_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("evaluation_runs.id", ondelete="SET NULL")
+    )
+    execution_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="sdk_task"
+    )
+    evidence_policy: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="trace_required"
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     configuration_snapshot: Mapped[dict[str, Any]] = mapped_column(
@@ -300,8 +501,14 @@ class EvaluationRunRecord(Base):
     executions: Mapped[list[CaseExecutionRecord]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
     )
+    items: Mapped[list[ExperimentItemAttemptRecord]] = relationship(
+        back_populates="experiment", cascade="all, delete-orphan"
+    )
     traces: Mapped[list[TraceRecord]] = relationship(back_populates="run")
     scores: Mapped[list[ScoreRecord]] = relationship(back_populates="run")
+    trigger_deliveries: Mapped[list[RemoteTriggerDeliveryRecord]] = relationship(
+        back_populates="experiment", cascade="all, delete-orphan"
+    )
 
 
 class CaseExecutionRecord(Base):
@@ -332,9 +539,70 @@ class CaseExecutionRecord(Base):
     trace: Mapped[TraceRecord | None] = relationship(foreign_keys=[trace_id])
 
 
+class ExperimentItemAttemptRecord(Base):
+    """Attempt-level evidence produced outside the platform control plane."""
+
+    __tablename__ = "experiment_item_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "experiment_id",
+            "case_id",
+            "repetition",
+            "attempt",
+            name="uq_experiment_item_attempt_position",
+        ),
+        UniqueConstraint(
+            "experiment_id",
+            "external_run_id",
+            name="uq_experiment_item_external_run",
+        ),
+        Index("ix_experiment_item_status", "experiment_id", "status"),
+        CheckConstraint("repetition >= 1", name="ck_experiment_item_repetition_positive"),
+        CheckConstraint("attempt >= 1", name="ck_experiment_item_attempt_positive"),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'completed', 'failed', 'cancelled')",
+            name="ck_experiment_item_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True, default=new_id)
+    experiment_id: Mapped[str] = mapped_column(
+        ForeignKey("evaluation_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    case_id: Mapped[str] = mapped_column(ForeignKey("dataset_cases.id"), nullable=False)
+    repetition: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    external_run_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    result_hash: Mapped[str | None] = mapped_column(String(64))
+    source_trace_id: Mapped[str | None] = mapped_column(String(128))
+    evidence_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    evidence_reasons: Mapped[list[str]] = mapped_column(JsonType, default=list, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    output: Mapped[Any | None] = mapped_column(JsonType)
+    usage: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict, nullable=False)
+    runtime_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JsonType, default=dict, nullable=False
+    )
+    error_type: Mapped[str | None] = mapped_column(String(100))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    trace_id: Mapped[str | None] = mapped_column(ForeignKey("traces.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    experiment: Mapped[EvaluationRunRecord] = relationship(back_populates="items")
+    dataset_case: Mapped[DatasetCaseRecord] = relationship(back_populates="experiment_items")
+    trace: Mapped[TraceRecord | None] = relationship(foreign_keys=[trace_id])
+
+
 class TraceRecord(Base):
     __tablename__ = "traces"
     __table_args__ = (
+        UniqueConstraint(
+            "project_id", "source", "trace_id", name="uq_traces_project_source_trace"
+        ),
         Index("ix_traces_project_created", "project_id", "created_at"),
         Index("ix_traces_run_case", "run_id", "case_id"),
     )
@@ -343,6 +611,9 @@ class TraceRecord(Base):
     project_id: Mapped[str] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
+    # Public ID supplied by the external Agent. ``id`` stays internal because
+    # existing Score/Execution/Span foreign keys point at it.
+    trace_id: Mapped[str | None] = mapped_column(String(128))
     run_id: Mapped[str | None] = mapped_column(
         ForeignKey("evaluation_runs.id", ondelete="SET NULL")
     )
@@ -359,6 +630,15 @@ class TraceRecord(Base):
     spans: Mapped[list[TraceSpanRecord]] = relationship(
         back_populates="trace", cascade="all, delete-orphan"
     )
+    scores: Mapped[list[ScoreRecord]] = relationship(back_populates="trace")
+
+
+@event.listens_for(TraceRecord, "before_insert")
+def populate_legacy_trace_id(_: Any, __: Any, target: TraceRecord) -> None:
+    """Keep direct ORM inserts compatible with pre-scoped Trace records."""
+
+    if target.trace_id is None:
+        target.trace_id = target.id
 
 
 class TraceSpanRecord(Base):
@@ -383,6 +663,8 @@ class TraceSpanRecord(Base):
     input: Mapped[Any | None] = mapped_column(JsonType)
     output: Mapped[Any | None] = mapped_column(JsonType)
     error: Mapped[dict[str, Any] | None] = mapped_column(JsonType)
+    usage: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict, nullable=False)
+    cost: Mapped[Any | None] = mapped_column(JsonType)
     attributes: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict, nullable=False)
     extensions: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict, nullable=False)
 
@@ -393,21 +675,36 @@ class ScoreRecord(Base):
     __tablename__ = "scores"
     __table_args__ = (
         UniqueConstraint(
-            "run_id", "case_id", "metric_name", "evaluator_version_id", name="uq_scores_case_metric"
+            "run_id",
+            "case_id",
+            "repetition",
+            "metric_name",
+            "evaluator_version_id",
+            "source",
+            name="uq_scores_case_metric_source",
         ),
         Index("ix_scores_run_metric", "run_id", "metric_name"),
+        CheckConstraint("repetition >= 1", name="ck_scores_repetition_positive"),
+        CheckConstraint("attempt IS NULL OR attempt >= 1", name="ck_scores_attempt_positive"),
     )
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True, default=new_id)
-    run_id: Mapped[str] = mapped_column(
-        ForeignKey("evaluation_runs.id", ondelete="CASCADE"), nullable=False
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("evaluation_runs.id", ondelete="CASCADE")
     )
-    case_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    case_id: Mapped[str | None] = mapped_column(String(128))
+    experiment_item_id: Mapped[str | None] = mapped_column(
+        ForeignKey("experiment_item_attempts.id", ondelete="SET NULL")
+    )
+    repetition: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    attempt: Mapped[int | None] = mapped_column(Integer)
     metric_name: Mapped[str] = mapped_column(String(200), nullable=False)
     evaluator_version_id: Mapped[str] = mapped_column(
         ForeignKey("evaluator_versions.id"), nullable=False
     )
     trace_id: Mapped[str | None] = mapped_column(ForeignKey("traces.id"))
+    span_id: Mapped[str | None] = mapped_column(String(128))
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="automated")
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     value: Mapped[float | None] = mapped_column(Float)
     label: Mapped[str | None] = mapped_column(String(100))
@@ -416,11 +713,14 @@ class ScoreRecord(Base):
     evidence: Mapped[list[dict[str, Any]]] = mapped_column(JsonType, default=list, nullable=False)
     rubric: Mapped[str | None] = mapped_column(Text)
     judge_model: Mapped[str | None] = mapped_column(String(200))
+    provenance: Mapped[dict[str, Any] | None] = mapped_column(JsonType)
     threshold: Mapped[float | None] = mapped_column(Float)
     direction: Mapped[str] = mapped_column(String(32), nullable=False)
+    raw_response: Mapped[Any | None] = mapped_column(JsonType)
     raw_result: Mapped[Any | None] = mapped_column(JsonType)
 
-    run: Mapped[EvaluationRunRecord] = relationship(back_populates="scores")
+    run: Mapped[EvaluationRunRecord | None] = relationship(back_populates="scores")
+    trace: Mapped[TraceRecord | None] = relationship(back_populates="scores")
 
 
 class AnnotationQueueRecord(Base):
@@ -537,3 +837,47 @@ def reject_version_mutation(_: Any, __: Any, target: Any) -> None:
     if isinstance(target, (AgentVersionRecord, EvaluatorVersionRecord)) and changed <= {"enabled"}:
         return
     raise ValueError("versioned records are immutable")
+
+
+@event.listens_for(ExperimentItemAttemptRecord, "before_update")
+def reject_terminal_experiment_item_mutation(
+    _: Any, __: Any, target: ExperimentItemAttemptRecord
+) -> None:
+    """Once an attempt is terminal, its output and provenance are evidence."""
+
+    status_history = inspect(target).attrs.status.history
+    previous_status = status_history.deleted[0] if status_history.deleted else target.status
+    state = inspect(target)
+    changed = {
+        attribute.key
+        for attribute in state.mapper.column_attrs
+        if state.attrs[attribute.key].history.has_changes()
+    }
+    derived_fields = {"trace_id", "evidence_status", "evidence_reasons"}
+    if previous_status in {"completed", "failed", "cancelled"} and not changed <= derived_fields:
+        raise ValueError("terminal experiment item attempts are immutable")
+
+
+@event.listens_for(EvaluationRunRecord, "before_update")
+def reject_experiment_definition_mutation(_: Any, __: Any, target: EvaluationRunRecord) -> None:
+    """Execution state changes, but the submitted Experiment definition does not."""
+
+    immutable_fields = {
+        "project_id",
+        "name",
+        "agent_version_id",
+        "dataset_version_id",
+        "baseline_run_id",
+        "execution_mode",
+        "evidence_policy",
+        "configuration_snapshot",
+        "created_at",
+    }
+    state = inspect(target)
+    changed = {
+        attribute.key
+        for attribute in state.mapper.column_attrs
+        if state.attrs[attribute.key].history.has_changes()
+    }
+    if changed & immutable_fields:
+        raise ValueError("experiment definitions are immutable")

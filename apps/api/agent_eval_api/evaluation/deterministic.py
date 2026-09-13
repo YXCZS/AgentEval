@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema import Draft202012Validator
 
-from agent_eval_api.contracts import ScoreDirection, ScoreStatus
+from agent_eval_api.contracts import ExecutionStatus, ScoreDirection, ScoreStatus
 
 from .base import (
     EvaluationContext,
@@ -80,6 +81,389 @@ def _read_path(value: Any, path: str | None) -> Any:
             return None
         current = current[segment]
     return current
+
+
+def _normalized_text(value: Any) -> str:
+    return " ".join(str(value).split()).casefold()
+
+
+def _context_item(value: Any) -> dict[str, Any] | None:
+    """Normalize the small set of retrieval shapes used by external agents."""
+
+    if isinstance(value, str) and value.strip():
+        return {"content": value}
+    if not isinstance(value, Mapping):
+        return None
+    nested_document = value.get("document")
+    if isinstance(nested_document, Mapping):
+        value = {
+            **dict(nested_document),
+            **{
+            key: item for key, item in value.items() if key != "document"
+            },
+        }
+    content = value.get("content") or value.get("text") or value.get("page_content")
+    document_id = (
+        value.get("document_id")
+        or value.get("documentId")
+        or value.get("source_id")
+        or value.get("id")
+    )
+    if content is None and document_id is None:
+        return None
+    item: dict[str, Any] = {
+        "content": str(content) if content is not None else "",
+    }
+    if document_id is not None:
+        item["document_id"] = str(document_id)
+    metadata = value.get("metadata")
+    if isinstance(metadata, Mapping):
+        item["metadata"] = dict(metadata)
+    return item
+
+
+def _context_items(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        items: list[dict[str, Any]] = []
+        for item in value:
+            normalized = _context_item(item)
+            if normalized is not None:
+                items.append(normalized)
+                continue
+            items.extend(_context_items(item))
+        return items
+    if isinstance(value, Mapping):
+        for key in (
+            "retrieval_context",
+            "retrieved_contexts",
+            "contexts",
+            "documents",
+            "results",
+            "output",
+            "data",
+            "result",
+        ):
+            if key in value:
+                return _context_items(value[key])
+    normalized = _context_item(value)
+    return [normalized] if normalized is not None else []
+
+
+def _retrieved_contexts(context: EvaluationContext) -> list[dict[str, Any]]:
+    if context.trace is None:
+        return []
+    candidates: list[dict[str, Any]] = []
+    for span in context.trace.spans:
+        if span.kind.value != "retrieval":
+            continue
+        candidates.extend(_context_items(span.output))
+        for key in ("retrieval_context", "retrieved_contexts", "documents", "results"):
+            candidates.extend(_context_items(span.attributes.get(key)))
+
+    external = context.trace.extensions.get("agent_eval.external_trace")
+    if isinstance(external, Mapping):
+        candidates.extend(_context_items(external.get("retrieval_context")))
+        candidates.extend(_context_items(external.get("retrieved_contexts")))
+        candidates.extend(_context_items(external.get("spans")))
+
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in candidates:
+        identity = json.dumps(item, sort_keys=True, ensure_ascii=False, default=str)
+        if identity not in seen:
+            seen.add(identity)
+            unique.append(item)
+    return unique
+
+
+def context_recall(context: EvaluationContext) -> EvaluatorOutcome:
+    """Measure how many expected reference documents were retrieved."""
+
+    expected = [item.model_dump(mode="json") for item in context.case.retrieval_context]
+    if not expected:
+        return _missing(context, "retrieval_context is required")
+    if context.trace is None:
+        return _missing(context, "trace retrieval evidence is required")
+    actual = _retrieved_contexts(context)
+    if not actual:
+        return _missing(context, "trace contains no retrieval evidence")
+
+    matched: list[dict[str, Any]] = []
+    for expected_item in expected:
+        expected_id = expected_item.get("document_id")
+        expected_content = _normalized_text(expected_item.get("content", ""))
+        matching = next(
+            (
+                item
+                for item in actual
+                if (
+                    expected_id is not None
+                    and item.get("document_id") == expected_id
+                )
+                or (
+                    expected_id is None
+                    and expected_content
+                    and expected_content in _normalized_text(item.get("content", ""))
+                )
+            ),
+            None,
+        )
+        matched.append(
+            {
+                "expected": expected_item,
+                "actual": matching,
+                "matched": matching is not None,
+            }
+        )
+    value = sum(item["matched"] for item in matched) / len(expected)
+    return _outcome(
+        context,
+        value=value,
+        explanation=(
+            f"{sum(item['matched'] for item in matched)}/{len(expected)} "
+            "reference contexts retrieved"
+        ),
+        evidence=[
+            {
+                "expected_count": len(expected),
+                "actual_count": len(actual),
+                "matches": matched,
+            }
+        ],
+    )
+
+
+def _citation_ids(value: Any) -> list[str]:
+    if isinstance(value, Mapping):
+        value = value.get("citations", value.get("references", value.get("sources")))
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    citations: list[str] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            item = item.get("document_id") or item.get("documentId") or item.get("id")
+        if item is not None and str(item).strip():
+            citations.append(str(item))
+    return citations
+
+
+def citation_accuracy(context: EvaluationContext) -> EvaluatorOutcome:
+    expected = {
+        item.document_id for item in context.case.retrieval_context if item.document_id
+    }
+    if not expected:
+        return _missing(context, "retrieval_context document_id values are required")
+    path = str(context.evaluator.config.get("citation_path", "citations"))
+    citations = _citation_ids(_read_path(context.execution.output, path))
+    actual = set(citations)
+    true_positives = len(expected & actual)
+    precision = true_positives / len(actual) if actual else 0.0
+    recall = true_positives / len(expected)
+    mode = str(context.evaluator.config.get("citation_metric", "f1")).casefold()
+    if mode == "precision":
+        value = precision
+    elif mode == "recall":
+        value = recall
+    elif mode == "f1":
+        value = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    else:
+        raise EvaluatorConfigurationError(
+            "citation_metric must be precision, recall or f1"
+        )
+    return _outcome(
+        context,
+        value=value,
+        explanation=f"citation {mode} is {value:.3f}",
+        evidence=[
+            {
+                "expected_citations": sorted(expected),
+                "actual_citations": citations,
+                "true_positives": true_positives,
+                "precision": precision,
+                "recall": recall,
+                "metric": mode,
+                "path": path,
+            }
+        ],
+    )
+
+
+def output_format(context: EvaluationContext) -> EvaluatorOutcome:
+    """Check a declared output shape without depending on a model provider."""
+
+    config = context.evaluator.config
+    actual = _read_path(
+        context.execution.output,
+        str(config["output_path"]) if config.get("output_path") else None,
+    )
+    format_name = str(config.get("format", config.get("type", ""))).casefold()
+    aliases = {
+        "json_object": "object",
+        "json_array": "array",
+        "text": "string",
+        "int": "integer",
+        "float": "number",
+    }
+    format_name = aliases.get(format_name, format_name)
+    if not format_name:
+        if context.case.output_schema is None:
+            return _missing(context, "output_format requires config.format or output_schema")
+        schema = context.case.output_schema
+        try:
+            Draft202012Validator.check_schema(schema)
+        except Exception as exc:
+            raise EvaluatorConfigurationError(f"invalid output_schema: {exc}") from exc
+        errors = list(Draft202012Validator(schema).iter_errors(actual))
+        return _outcome(
+            context,
+            value=0.0 if errors else 1.0,
+            explanation=(
+                "output matches the declared output schema"
+                if not errors
+                else f"{len(errors)} output schema errors"
+            ),
+            evidence=[
+                {
+                    "format": "json_schema",
+                    "errors": [error.message for error in errors],
+                }
+            ],
+        )
+
+    valid_formats = {
+        "json",
+        "object",
+        "array",
+        "string",
+        "number",
+        "integer",
+        "boolean",
+        "non_empty",
+    }
+    if format_name not in valid_formats:
+        raise EvaluatorConfigurationError(
+            "output format must be json, object, array, string, number, integer, "
+            "boolean or non_empty"
+        )
+    if format_name == "json":
+        try:
+            json.dumps(actual, ensure_ascii=False)
+            matches = True
+        except (TypeError, ValueError):
+            matches = False
+    elif format_name == "object":
+        matches = isinstance(actual, Mapping)
+    elif format_name == "array":
+        matches = isinstance(actual, list)
+    elif format_name == "string":
+        matches = isinstance(actual, str)
+    elif format_name == "number":
+        matches = isinstance(actual, int | float) and not isinstance(actual, bool)
+    elif format_name == "integer":
+        matches = isinstance(actual, int) and not isinstance(actual, bool)
+    elif format_name == "boolean":
+        matches = isinstance(actual, bool)
+    else:
+        matches = actual is not None and bool(actual)
+
+    required_fields = config.get("required_fields", [])
+    missing_fields: list[str] = []
+    if required_fields:
+        if not isinstance(required_fields, list) or not isinstance(actual, Mapping):
+            missing_fields = [str(field) for field in required_fields]
+        else:
+            missing_fields = [
+                str(field) for field in required_fields if str(field) not in actual
+            ]
+        matches = matches and not missing_fields
+
+    pattern = config.get("pattern")
+    if pattern is not None:
+        if not isinstance(actual, str):
+            pattern_matches = False
+        else:
+            try:
+                pattern_matches = re.fullmatch(str(pattern), actual) is not None
+            except re.error as exc:
+                raise EvaluatorConfigurationError("output format pattern is invalid") from exc
+        matches = matches and pattern_matches
+    min_length = config.get("min_length")
+    if min_length is not None:
+        if not isinstance(min_length, int) or min_length < 0:
+            raise EvaluatorConfigurationError(
+                "output format min_length must be a non-negative integer"
+            )
+        try:
+            matches = matches and len(actual) >= min_length
+        except TypeError:
+            matches = False
+    return _outcome(
+        context,
+        value=1.0 if matches else 0.0,
+        explanation=(
+            f"output format is {format_name}"
+            if matches
+            else f"output format is not {format_name}"
+        ),
+        evidence=[
+            {
+                "format": format_name,
+                "output_path": config.get("output_path"),
+                "required_fields": required_fields,
+                "missing_fields": missing_fields,
+                "pattern": pattern,
+                "min_length": min_length,
+                "actual_type": type(actual).__name__,
+            }
+        ],
+    )
+
+
+def error_rate(context: EvaluationContext) -> EvaluatorOutcome:
+    """Return 1 for an observed execution error and 0 for a clean execution."""
+
+    if context.execution.status in {ExecutionStatus.QUEUED, ExecutionStatus.RUNNING}:
+        return EvaluatorOutcome(
+            metric_name=context.evaluator.name,
+            status=ScoreStatus.NOT_RUN,
+            explanation="execution has not reached a terminal state",
+        )
+    sources: list[dict[str, Any]] = []
+    if context.execution.status in {ExecutionStatus.FAILED, ExecutionStatus.CANCELLED}:
+        sources.append(
+            {
+                "source": "execution",
+                "status": context.execution.status.value,
+                "error_type": context.execution.error_type,
+                "error_message": context.execution.error_message,
+            }
+        )
+    if context.trace is not None:
+        if context.trace.status in {ExecutionStatus.FAILED, ExecutionStatus.CANCELLED}:
+            sources.append({"source": "trace", "status": context.trace.status.value})
+        for span in context.trace.spans:
+            if span.error is not None or span.status in {
+                ExecutionStatus.FAILED,
+                ExecutionStatus.CANCELLED,
+            }:
+                sources.append(
+                    {
+                        "source": "span",
+                        "span_id": span.span_id,
+                        "name": span.name,
+                        "status": span.status.value,
+                        "error": span.error,
+                    }
+                )
+    has_error = bool(sources)
+    return _outcome(
+        context,
+        value=1.0 if has_error else 0.0,
+        explanation="execution errors detected" if has_error else "no execution errors detected",
+        evidence=sources or [{"error": False}],
+    )
 
 
 def task_success(context: EvaluationContext) -> EvaluatorOutcome:
@@ -342,14 +726,25 @@ def token_usage(context: EvaluationContext) -> EvaluatorOutcome:
 DETERMINISTIC_EVALUATORS: dict[str, EvaluatorFunction] = {
     "exact_match": exact_match,
     "task_success": task_success,
+    "state_assertion": task_success,
+    "state": task_success,
     "tool_correctness": tool_correctness,
     "argument_correctness": argument_correctness,
     "policy_compliance": policy_compliance,
     "json_schema": json_schema,
+    "output_format": output_format,
+    "context_recall": context_recall,
+    "retrieval_context": context_recall,
+    "reference_context": context_recall,
+    "citation": citation_accuracy,
+    "citation_accuracy": citation_accuracy,
     "latency": latency,
     "token": token_usage,
     "token_usage": token_usage,
     "cost": cost,
+    "error": error_rate,
+    "error_rate": error_rate,
+    "execution_error_rate": error_rate,
 }
 
 

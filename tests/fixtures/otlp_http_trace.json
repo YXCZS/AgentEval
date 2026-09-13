@@ -1,0 +1,106 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {"stringValue": "order-agent"}
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "order-agent.instrumentation",
+            "version": "1.2.0",
+            "vendor.scope": "kept"
+          },
+          "spans": [
+            {
+              "traceId": "otlp-trace-1",
+              "spanId": "agent-span",
+              "name": "order-agent",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1720000000000000000",
+              "endTimeUnixNano": "1720000003000000000",
+              "status": {"code": "STATUS_CODE_OK"},
+              "attributes": [
+                {
+                  "key": "openinference.span.kind",
+                  "value": {"stringValue": "AGENT"}
+                }
+              ]
+            },
+            {
+              "traceId": "otlp-trace-1",
+              "spanId": "tool-span",
+              "parentSpanId": "agent-span",
+              "name": "search_order",
+              "kind": "SPAN_KIND_CLIENT",
+              "startTimeUnixNano": "1720000001000000000",
+              "endTimeUnixNano": "1720000002000000000",
+              "status": {"code": "STATUS_CODE_OK"},
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {"stringValue": "execute_tool"}
+                },
+                {
+                  "key": "tool.call.arguments",
+                  "value": {"stringValue": "{\"order_id\":\"42\"}"}
+                }
+              ]
+            },
+            {
+              "traceId": "otlp-trace-1",
+              "spanId": "tool-result-span",
+              "parentSpanId": "tool-span",
+              "name": "search_order.result",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1720000002000000000",
+              "status": {"code": "STATUS_CODE_OK"},
+              "attributes": [
+                {
+                  "key": "openinference.span.kind",
+                  "value": {"stringValue": "TOOL_RESULT"}
+                },
+                {
+                  "key": "tool.call.result",
+                  "value": {"stringValue": "{\"status\":\"shipped\"}"}
+                }
+              ]
+            },
+            {
+              "traceId": "otlp-trace-1",
+              "spanId": "llm-span",
+              "parentSpanId": "agent-span",
+              "name": "chat completion",
+              "kind": "SPAN_KIND_CLIENT",
+              "startTimeUnixNano": "1720000000500000000",
+              "status": {"code": "STATUS_CODE_OK"},
+              "attributes": [
+                {
+                  "key": "openinference.span.kind",
+                  "value": {"stringValue": "LLM"}
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {"intValue": "10"}
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {"intValue": "4"}
+                },
+                {
+                  "key": "gen_ai.usage.total_tokens",
+                  "value": {"intValue": "14"}
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

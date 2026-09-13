@@ -1,0 +1,75 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "external-agent"}}
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {"name": "io.opentelemetry.contrib.openinference"},
+          "spans": [
+            {
+              "traceId": "11111111111111111111111111111111",
+              "spanId": "1111111111111111",
+              "name": "external-agent.task",
+              "startTimeUnixNano": "1720000000000000000",
+              "endTimeUnixNano": "1720000001000000000",
+              "attributes": [
+                {"key": "openinference.span.kind", "value": {"stringValue": "AGENT"}},
+                {"key": "agent_eval.project.id", "value": {"stringValue": "__PROJECT_ID__"}},
+                {"key": "agent_eval.experiment.id", "value": {"stringValue": "__EXPERIMENT_ID__"}},
+                {"key": "agent_eval.experiment.item.id", "value": {"stringValue": "__ITEM_ID__"}},
+                {"key": "agent_eval.dataset.id", "value": {"stringValue": "__DATASET_ID__"}},
+                {"key": "agent_eval.dataset.version.id", "value": {"stringValue": "__DATASET_VERSION_ID__"}},
+                {"key": "agent_eval.case.id", "value": {"stringValue": "cancel-42"}},
+                {"key": "agent_eval.agent.release", "value": {"stringValue": "git-sha-sdk"}},
+                {"key": "agent_eval.execution.origin", "value": {"stringValue": "otel"}},
+                {"key": "agent_eval.repetition", "value": {"intValue": "1"}}
+              ]
+            },
+            {
+              "traceId": "11111111111111111111111111111111",
+              "spanId": "2222222222222222",
+              "parentSpanId": "1111111111111111",
+              "name": "chat.completions",
+              "startTimeUnixNano": "1720000000100000000",
+              "endTimeUnixNano": "1720000000200000000",
+              "attributes": [
+                {"key": "openinference.span.kind", "value": {"stringValue": "LLM"}},
+                {"key": "gen_ai.request.model", "value": {"stringValue": "external-model"}},
+                {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "4"}},
+                {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "2"}}
+              ]
+            },
+            {
+              "traceId": "11111111111111111111111111111111",
+              "spanId": "3333333333333333",
+              "parentSpanId": "1111111111111111",
+              "name": "lookup_order",
+              "startTimeUnixNano": "1720000000300000000",
+              "endTimeUnixNano": "1720000000400000000",
+              "attributes": [
+                {"key": "openinference.span.kind", "value": {"stringValue": "TOOL"}},
+                {"key": "tool.call.arguments", "value": {"stringValue": "{\"order_id\":\"42\"}"}}
+              ]
+            },
+            {
+              "traceId": "11111111111111111111111111111111",
+              "spanId": "4444444444444444",
+              "parentSpanId": "3333333333333333",
+              "name": "lookup_order result",
+              "startTimeUnixNano": "1720000000500000000",
+              "endTimeUnixNano": "1720000000600000000",
+              "attributes": [
+                {"key": "openinference.span.kind", "value": {"stringValue": "TOOL_RESULT"}},
+                {"key": "tool.call.result", "value": {"stringValue": "{\"status\":\"cancelled\"}"}}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

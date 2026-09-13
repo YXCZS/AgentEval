@@ -5,10 +5,10 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
-        NEXT_PUBLIC_PROJECT_ID: ${NEXT_PUBLIC_PROJECT_ID:-project-1}
-        NEXT_PUBLIC_WORKSPACE_SESSION: ${NEXT_PUBLIC_WORKSPACE_SESSION:-dev:project-1:local-compose-session-secret}
+        NEXT_PUBLIC_PROJECT_ID: ${NEXT_PUBLIC_PROJECT_ID:-default-project}
+        NEXT_PUBLIC_WORKSPACE_SESSION: ${NEXT_PUBLIC_WORKSPACE_SESSION:-dev:default-project:local-compose-session-secret}
     ports:
-      - "3000:3000"
+      - "${AGENT_EVAL_WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
@@ -23,10 +23,11 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       API_KEY_SALT: ${API_KEY_SALT:-local-compose-api-key-salt}
       WORKSPACE_SESSION_SECRET: ${WORKSPACE_SESSION_SECRET:-local-compose-session-secret}
-      NEXT_PUBLIC_WORKSPACE_SESSION: ${NEXT_PUBLIC_WORKSPACE_SESSION:-dev:project-1:local-compose-session-secret}
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+      AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY:-}
+      AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID:-primary}
+      AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS: '${AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS:-{}}'
     ports:
-      - "8000:8000"
+      - "${AGENT_EVAL_API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,50 +49,14 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       API_KEY_SALT: ${API_KEY_SALT:-local-compose-api-key-salt}
       WORKSPACE_SESSION_SECRET: ${WORKSPACE_SESSION_SECRET:-local-compose-session-secret}
+      AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY:-}
+      AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID:-primary}
+      AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS: '${AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS:-{}}'
     depends_on:
       redis:
         condition: service_healthy
       api:
         condition: service_healthy
-
-  prompt-agent:
-    build:
-      context: ..
-      dockerfile: apps/api/Dockerfile
-    command: ["uvicorn", "examples.prompt_agent.app:app", "--host", "0.0.0.0", "--port", "8101"]
-    ports:
-      - "8101:8101"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/docs')"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-
-  rag-agent:
-    build:
-      context: ..
-      dockerfile: apps/api/Dockerfile
-    command: ["uvicorn", "examples.rag_agent.app:app", "--host", "0.0.0.0", "--port", "8102"]
-    ports:
-      - "8102:8102"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8102/docs')"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-
-  order-agent:
-    build:
-      context: ..
-      dockerfile: apps/api/Dockerfile
-    command: ["uvicorn", "examples.order_agent.app:app", "--host", "0.0.0.0", "--port", "8103"]
-    ports:
-      - "8103:8103"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8103/docs')"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
 
   postgres:
     image: postgres:16-alpine

@@ -9,6 +9,7 @@ from agent_eval_api.contracts import (
     CaseExecution,
     DatasetCase,
     EvaluatorVersion,
+    ExternalScoreProvenance,
     ScoreStatus,
     Trace,
 )
@@ -31,7 +32,11 @@ class EvaluatorOutcome:
     passed: bool | None = None
     explanation: str | None = None
     evidence: list[dict[str, Any]] = field(default_factory=list)
+    provenance: ExternalScoreProvenance | None = None
+    raw_response: Any = None
     raw_result: Any = None
+    usage: dict[str, Any] = field(default_factory=dict)
+    cost: dict[str, Any] | None = None
 
 
 class Evaluator(Protocol):

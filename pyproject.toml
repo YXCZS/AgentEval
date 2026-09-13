@@ -5,17 +5,25 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-eval-workbench"
 version = "0.1.0"
-description = "Trace-driven evaluation workbench for prompt, RAG, and tool agents."
+description = "Trace-driven evaluation workbench for RAG, tool, and custom agents."
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.30,<1",
   "pydantic-settings>=2.5,<3",
+  "python-dotenv>=1.0,<2",
   "sqlalchemy>=2.0,<3",
   "psycopg[binary]>=3.2,<4",
   "alembic>=1.13,<2",
   "httpx>=0.27,<1",
   "jsonschema>=4.23,<5",
+  "jinja2>=3.1,<4",
+  "PyYAML>=6.0,<7",
+  "cryptography>=43,<51",
+  "openai>=2.54,<4",
+  "python-dotenv>=1.0,<2",
+  "opentelemetry-api>=1.28,<2",
+  "openinference-semantic-conventions>=0.1.37,<0.2",
   "celery>=5.4,<6",
   "redis>=5,<6",
 ]
@@ -27,21 +35,22 @@ dev = [
   "ruff>=0.6,<1",
   "mypy>=1.11,<2",
   "types-jsonschema>=4.23,<5",
+  "types-PyYAML>=6.0,<7",
 ]
 
 [tool.setuptools.packages.find]
-where = ["apps/api", "apps/worker", "examples"]
-include = ["agent_eval_api*", "agent_eval_worker*", "examples*"]
+where = ["apps/api", "apps/worker"]
+include = ["agent_eval_api*", "agent_eval_worker*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["apps/api", "apps/worker", "."]
+pythonpath = ["apps/api", "apps/worker", "sdk/python/src", "."]
 asyncio_mode = "auto"
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["apps/api", "apps/worker", "examples", "tests"]
+src = ["apps/api", "apps/worker", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -49,5 +58,5 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["apps/api", "apps/worker", "examples"]
+files = ["apps/api", "apps/worker"]
 exclude = ["^tests/"]

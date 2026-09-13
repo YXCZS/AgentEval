@@ -16,6 +16,29 @@ def test_csv_parser_handles_quoted_fields_and_nested_json() -> None:
     assert parsed.cases[0].expected_tools[0].name == "search_order"
 
 
+def test_csv_parser_handles_rag_and_tool_extension_fields() -> None:
+    content = (
+        b"id,input,expected_output,output_schema,expected_tools,expected_state,retrieval_context,messages,metadata\n"
+        b'case-1,Find order,shipped,"{""type"": ""object""}",'
+        b'"[{""name"": ""search_order"", ""arguments"": {""order_id"": ""42""}}]",'
+        b'"{""status"": ""shipped""}",'
+        b'"[{""content"": ""Order 42 shipped"", ""document_id"": ""doc-1""}]",'
+        b'"[{""role"": ""user"", ""content"": ""Find order""}]",'
+        b'"{""category"": ""orders""}\n'
+    )
+
+    parsed = parse_dataset_bytes(content, DatasetImportFormat.CSV)
+
+    assert parsed.issues == []
+    case = parsed.cases[0]
+    assert case.output_schema == {"type": "object"}
+    assert case.expected_tools[0].arguments == {"order_id": "42"}
+    assert case.expected_state == {"status": "shipped"}
+    assert case.retrieval_context[0].document_id == "doc-1"
+    assert case.messages[0].role == "user"
+    assert case.metadata == {"category": "orders"}
+
+
 def test_json_and_jsonl_report_row_level_validation_errors() -> None:
     json_parsed = parse_dataset_bytes(
         b'[{"id":"case-1","input":"ok"},{"id":"case-1","input":"duplicate"}]',

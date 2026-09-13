@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+.local-run/
 .agents/
 __pycache__/
 .pytest_cache/
@@ -9,11 +10,13 @@ __pycache__/
 .coverage
 htmlcov/
 node_modules/
+artifacts/
 .next/
 playwright-report/
 test-results/
 apps/web/artifacts/
 dist/
+build/
 *.sqlite3
 *.db
 *.db-shm
@@ -24,3 +27,5 @@ dist/
 *.tsbuildinfo
 *.egg-info/
 demo-result.json
+backups/
+migration-rehearsal/

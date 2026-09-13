@@ -9,6 +9,8 @@ import {
   CircleDashed,
   Clock3,
   Download,
+  ExternalLink,
+  FileJson,
   FileSearch,
   GitCompareArrows,
   LoaderCircle,
@@ -54,8 +56,10 @@ type Score = {
   evidence: Array<Record<string, unknown>>;
   rubric: string | null;
   judge_model: string | null;
+  provenance: Record<string, unknown> | null;
   threshold: number | null;
   direction: Direction;
+  raw_response: JsonValue;
   raw_result: JsonValue;
 };
 type ReportCase = {
@@ -117,9 +121,56 @@ type ComparisonPoint = {
   delta_average: number | null;
   delta_pass_rate: number | null;
 };
+type ComparisonRunCase = {
+  run_id: string;
+  execution_status: ExecutionStatus;
+  output: JsonValue;
+  trace_id: string | null;
+  error_type: string | null;
+  error_message: string | null;
+  failed: boolean;
+  scores: Score[];
+};
+type FirstError = {
+  category:
+    | "tool_selection"
+    | "tool_arguments"
+    | "tool_execution"
+    | "retrieval"
+    | "final_answer"
+    | "format"
+    | "timeout"
+    | "cost_or_latency"
+    | "indeterminate";
+  reason: string;
+  baseline_trace_id: string | null;
+  candidate_trace_id: string | null;
+  baseline_span_id: string | null;
+  candidate_span_id: string | null;
+  evidence: Array<Record<string, unknown>>;
+};
+type ComparisonCase = {
+  case_id: string;
+  metadata: Record<string, unknown>;
+  critical: boolean;
+  runs: ComparisonRunCase[];
+  first_error: FirstError | null;
+};
 type Comparison = {
   dataset_version_id: string;
   baseline_run_id: string;
+  runs: Array<{
+    run_id: string;
+    agent_version_id: string;
+    agent_version: Record<string, unknown>;
+    dataset_version_id: string;
+    status: RunStatus;
+    total_cases: number;
+    completed_cases: number;
+    failed_cases: number;
+    created_at: string;
+    finished_at: string | null;
+  }>;
   metric_comparisons: Array<{
     metric_name: string;
     comparable: boolean;
@@ -129,12 +180,33 @@ type Comparison = {
   new_failures: Array<{
     case_id: string;
     run_id: string;
+    baseline_run_id: string;
     failed_metrics: string[];
+    critical: boolean;
+    first_error: FirstError | null;
   }>;
   recovered_cases: Array<{
     case_id: string;
     run_id: string;
+    baseline_run_id: string;
     failed_metrics: string[];
+    critical: boolean;
+    first_error: FirstError | null;
+  }>;
+  case_comparisons: ComparisonCase[];
+  missing_evidence: Array<{
+    run_id: string;
+    metric_name: string;
+    status: "missing" | "error";
+    case_ids: string[];
+  }>;
+  critical_task_impact: Array<{
+    candidate_run_id: string;
+    critical_case_count: number;
+    baseline_failed_count: number;
+    candidate_failed_count: number;
+    newly_regressed_case_ids: string[];
+    recovered_case_ids: string[];
   }>;
 };
 type GateRule = {
@@ -148,7 +220,16 @@ type GateRule = {
 type GateResult = {
   run_id: string;
   run_status: RunStatus;
-  status: "passed" | "failed" | "indeterminate" | "incomplete";
+  status:
+    | "passed"
+    | "failed"
+    | "indeterminate"
+    | "incomplete"
+    | "PASS"
+    | "WARNING"
+    | "BLOCK"
+    | "INCOMPLETE"
+    | "INDETERMINATE";
   rules: Array<{
     rule: GateRule;
     status: "passed" | "failed" | "indeterminate" | "incomplete";
@@ -159,10 +240,12 @@ type GateResult = {
     failed_case_ids: string[];
     reason: string | null;
   }>;
+  policy_version?: string | null;
+  generated_at: string;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "project-1";
+const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "default-project";
 const SESSION = process.env.NEXT_PUBLIC_WORKSPACE_SESSION ?? "";
 
 function requestHeaders(): HeadersInit {
@@ -212,6 +295,13 @@ function label(value: string): string {
       missing: "缺失",
       error: "错误",
       not_run: "未运行",
+      incomplete: "证据不完整",
+      indeterminate: "无法确定",
+      PASS: "通过",
+      WARNING: "警告",
+      BLOCK: "阻断发布",
+      INCOMPLETE: "证据不完整",
+      INDETERMINATE: "无法确定",
     }[value] ?? value.replaceAll("_", " ")
   );
 }
@@ -237,16 +327,43 @@ function formatDate(value: string): string {
 function statusTone(
   status: string,
 ): "success" | "danger" | "warning" | "neutral" {
-  if (status === "completed" || status === "passed") return "success";
-  if (status === "failed" || status === "error") return "danger";
+  if (status === "completed" || status === "passed" || status === "PASS") return "success";
+  if (status === "failed" || status === "error" || status === "BLOCK") return "danger";
   if (
     status === "partial" ||
     status === "cancelled" ||
     status === "missing" ||
-    status === "not_run"
+    status === "not_run" ||
+    status === "incomplete" ||
+    status === "indeterminate" ||
+    status === "WARNING" ||
+    status === "INCOMPLETE" ||
+    status === "INDETERMINATE"
   )
     return "warning";
   return "neutral";
+}
+
+function comparisonDeltaLabel(delta: number): string {
+  if (delta > 0) return "改善";
+  if (delta < 0) return "退化";
+  return "持平";
+}
+
+function diagnosisLabel(category: FirstError["category"]): string {
+  return (
+    {
+      tool_selection: "工具选择",
+      tool_arguments: "工具参数",
+      tool_execution: "工具执行",
+      retrieval: "检索",
+      final_answer: "最终回答",
+      format: "输出格式",
+      timeout: "超时",
+      cost_or_latency: "成本或延迟",
+      indeterminate: "无法确定",
+    }[category] ?? category
+  );
 }
 
 function StatusMark({ status }: { status: string }) {
@@ -267,8 +384,10 @@ function StatusMark({ status }: { status: string }) {
   );
 }
 
-export function ReportsView() {
-  const [mode, setMode] = useState<"report" | "compare">("report");
+type ReportMode = "report" | "compare" | "gate";
+
+export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMode }) {
+  const [mode, setMode] = useState<"report" | "compare">(initialMode === "report" ? "report" : "compare");
   const [summaries, setSummaries] = useState<ReportSummary[]>([]);
   const [runId, setRunId] = useState("");
   const [report, setReport] = useState<Report | null>(null);
@@ -282,11 +401,18 @@ export function ReportsView() {
   const [notice, setNotice] = useState<string | null>(null);
   const [comparisonIds, setComparisonIds] = useState<string[]>([]);
   const [comparison, setComparison] = useState<Comparison | null>(null);
+  const [comparisonCaseId, setComparisonCaseId] = useState<string | null>(null);
+  const [comparisonFilter, setComparisonFilter] = useState<"all" | "regressed" | "recovered">("all");
   const [compareBusy, setCompareBusy] = useState(false);
   const [gateMetric, setGateMetric] = useState("");
   const [gateMinimum, setGateMinimum] = useState("0.9");
   const [gateHard, setGateHard] = useState(false);
+  const [usePolicy, setUsePolicy] = useState(false);
   const [gateResult, setGateResult] = useState<GateResult | null>(null);
+  const [gatePolicy, setGatePolicy] = useState(
+    "version: local-v1\ngates:\n  - metric: task_success\n    operator: gte\n    threshold: 0.90\n    severity: block",
+  );
+  const [pendingCaseId, setPendingCaseId] = useState<string | null>(null);
   const timelineRequestRef = useRef<AbortController | null>(null);
 
   async function loadSummaries() {
@@ -351,6 +477,14 @@ export function ReportsView() {
     return () => { stopped = true; if (timer !== undefined) window.clearTimeout(timer); controller.abort(); };
   }, [runId, metric, executionStatus]);
 
+  useEffect(() => {
+    if (!pendingCaseId || !report) return;
+    const item = report.cases.find((candidate) => candidate.case_id === pendingCaseId);
+    if (!item) return;
+    setPendingCaseId(null);
+    void selectCase(item);
+  }, [pendingCaseId, report]);
+
   const metricNames = useMemo(
     () =>
       Array.from(
@@ -389,6 +523,7 @@ export function ReportsView() {
         : [...current, runId].slice(-2),
     );
     setComparison(null);
+    setComparisonCaseId(null);
   }
   async function createComparison() {
     if (comparisonIds.length !== 2) {
@@ -404,19 +539,27 @@ export function ReportsView() {
           body: JSON.stringify({ run_ids: comparisonIds }),
         }),
       );
+      setComparisonCaseId(null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "无法比较这些运行。");
     } finally {
       setCompareBusy(false);
     }
   }
+  function openReportCase(nextRunId: string, caseId: string) {
+    setMode("report");
+    setRunId(nextRunId);
+    setPendingCaseId(caseId);
+    setMetric("");
+    setExecutionStatus("");
+  }
   async function evaluateGate() {
-    if (!runId || !gateMetric) {
-      setNotice("评估门禁前，请选择报告运行和指标。");
+    if (!runId || (!usePolicy && !gateMetric)) {
+      setNotice(usePolicy ? "评估门禁前，请选择报告运行。" : "评估门禁前，请选择报告运行和指标。");
       return;
     }
     const minimum = Number(gateMinimum);
-    if (!gateHard && (!Number.isFinite(minimum) || gateMinimum.trim() === "")) {
+    if (!usePolicy && !gateHard && (!Number.isFinite(minimum) || gateMinimum.trim() === "")) {
       setNotice("请输入数值型最低阈值，或要求所有用例通过。");
       return;
     }
@@ -432,12 +575,22 @@ export function ReportsView() {
     if (!gateHard && Number.isFinite(minimum) && gateMinimum.trim() !== "")
       rule.minimum = minimum;
     try {
-      setGateResult(
-        await requestJson<GateResult>(
-          `/projects/${PROJECT_ID}/runs/${runId}/regression-gate`,
-          { method: "POST", body: JSON.stringify({ rules: [rule] }) },
-        ),
+      const nextGateResult = await requestJson<GateResult>(
+        `/projects/${PROJECT_ID}/runs/${runId}/regression-gate`,
+        {
+          method: "POST",
+          body: JSON.stringify(
+            usePolicy ? { policy_yaml: gatePolicy } : { rules: [rule] },
+          ),
+        },
       );
+      setGateResult(nextGateResult);
+      if (nextGateResult.status === "BLOCK" && comparison) {
+        const failedCaseId = nextGateResult.rules
+          .flatMap((item) => item.failed_case_ids)
+          .find((caseId) => comparison.case_comparisons.some((item) => item.case_id === caseId));
+        if (failedCaseId) setComparisonCaseId(failedCaseId);
+      }
     } catch (error) {
       setNotice(
         error instanceof Error ? error.message : "无法评估此回归门禁。",
@@ -465,6 +618,49 @@ export function ReportsView() {
       URL.revokeObjectURL(url);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "无法导出此报告。");
+    }
+  }
+
+  async function downloadComparison(format: "json" | "markdown") {
+    if (comparisonIds.length !== 2) {
+      setNotice("请先选择基线和候选两个 Experiment，再导出比较 artifact。");
+      return;
+    }
+    const gate = gateResult
+      ? usePolicy
+        ? { policy_yaml: gatePolicy }
+        : gateMetric
+          ? {
+              rules: [
+                {
+                  metric_name: gateMetric.split("::")[0],
+                  evaluator_version_id: gateMetric.split("::")[1],
+                  aggregation: "pass_rate",
+                  require_all_passed: gateHard,
+                  ...(gateHard ? {} : { minimum: Number(gateMinimum) }),
+                },
+              ],
+            }
+          : undefined
+      : undefined;
+    try {
+      const response = await fetch(
+        `${API_URL}/projects/${PROJECT_ID}/comparisons/artifact?format=${format}`,
+        {
+          method: "POST",
+          headers: requestHeaders(),
+          body: JSON.stringify({ run_ids: comparisonIds, ...(gate ? { gate } : {}) }),
+        },
+      );
+      if (!response.ok) throw new Error(`artifact 导出失败（HTTP ${response.status}）`);
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `agent-eval-comparison.${format === "markdown" ? "md" : "json"}`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "无法导出比较 artifact。");
     }
   }
 
@@ -541,12 +737,22 @@ export function ReportsView() {
           minimum={gateMinimum}
           hard={gateHard}
           gateResult={gateResult}
+          comparisonCaseId={comparisonCaseId}
+          comparisonFilter={comparisonFilter}
+          usePolicy={usePolicy}
+          gatePolicy={gatePolicy}
           busy={compareBusy}
           onToggle={toggleComparison}
           onCompare={() => void createComparison()}
           onMetric={setGateMetric}
           onMinimum={setGateMinimum}
           onHard={setGateHard}
+          onSelectCase={setComparisonCaseId}
+          onFilter={setComparisonFilter}
+          onUsePolicy={setUsePolicy}
+          onPolicy={setGatePolicy}
+          onOpenCase={openReportCase}
+          onDownload={downloadComparison}
           onGate={() => void evaluateGate()}
         />
       ) : (
@@ -773,12 +979,22 @@ function ComparisonGatePanel({
   minimum,
   hard,
   gateResult,
+  comparisonCaseId,
+  comparisonFilter,
+  usePolicy,
+  gatePolicy,
   busy,
   onToggle,
   onCompare,
   onMetric,
   onMinimum,
   onHard,
+  onSelectCase,
+  onFilter,
+  onUsePolicy,
+  onPolicy,
+  onOpenCase,
+  onDownload,
   onGate,
 }: {
   summaries: ReportSummary[];
@@ -789,16 +1005,52 @@ function ComparisonGatePanel({
   minimum: string;
   hard: boolean;
   gateResult: GateResult | null;
+  comparisonCaseId: string | null;
+  comparisonFilter: "all" | "regressed" | "recovered";
+  usePolicy: boolean;
+  gatePolicy: string;
   busy: boolean;
   onToggle: (runId: string) => void;
   onCompare: () => void;
   onMetric: (value: string) => void;
   onMinimum: (value: string) => void;
   onHard: (value: boolean) => void;
+  onSelectCase: (caseId: string | null) => void;
+  onFilter: (value: "all" | "regressed" | "recovered") => void;
+  onUsePolicy: (value: boolean) => void;
+  onPolicy: (value: string) => void;
+  onOpenCase: (runId: string, caseId: string) => void;
+  onDownload: (format: "json" | "markdown") => void;
   onGate: () => void;
 }) {
   const current = summaries.find((item) => item.run_id === selectedRunId);
   const metrics = current?.metrics ?? [];
+  const comparisonRuns = comparison?.runs ?? [];
+  const missingEvidence = comparison?.missing_evidence ?? [];
+  const criticalTaskImpact = comparison?.critical_task_impact ?? [];
+  const changedCaseIds = new Set([
+    ...(comparison?.new_failures.map((item) => item.case_id) ?? []),
+    ...(comparison?.recovered_cases.map((item) => item.case_id) ?? []),
+  ]);
+  const visibleComparisonCases = (comparison?.case_comparisons ?? []).filter((item) => {
+    if (comparisonFilter === "all") return true;
+    if (comparisonFilter === "regressed") return comparison?.new_failures.some((change) => change.case_id === item.case_id);
+    return comparison?.recovered_cases.some((change) => change.case_id === item.case_id);
+  });
+  const [comparisonSearch, setComparisonSearch] = useState("");
+  const [comparisonPage, setComparisonPage] = useState(0);
+  const comparisonPageSize = 20;
+  const searchedComparisonCases = visibleComparisonCases.filter((item) => {
+    const query = comparisonSearch.trim().toLowerCase();
+    return !query || item.case_id.toLowerCase().includes(query) || item.first_error?.category.toLowerCase().includes(query);
+  });
+  const pagedComparisonCases = searchedComparisonCases.slice(
+    comparisonPage * comparisonPageSize,
+    (comparisonPage + 1) * comparisonPageSize,
+  );
+  const comparisonPageCount = Math.max(1, Math.ceil(searchedComparisonCases.length / comparisonPageSize));
+  const selectedComparisonCase = comparison?.case_comparisons.find((item) => item.case_id === comparisonCaseId) ?? null;
+  const candidateRunId = comparisonRuns[1]?.run_id ?? selectedRunId;
   return (
     <div className="compare-workbench">
       <section className="compare-config panel">
@@ -842,9 +1094,21 @@ function ComparisonGatePanel({
           <div className="report-panel-header">
             <div>
               <span className="section-kicker">比较结果</span>
-              <strong>{comparison.baseline_run_id.slice(0, 12)} 基线</strong>
+              <strong>基线 vs 候选</strong>
             </div>
-            <span>{comparison.dataset_version_id.slice(0, 12)}</span>
+            <span>数据集版本 {comparison.dataset_version_id.slice(0, 12)}</span>
+          </div>
+          <div className="comparison-run-summary">
+            {comparisonRuns.map((run, index) => (
+              <div key={run.run_id}>
+                <span>{index === 0 ? "基线版本" : "候选版本"}</span>
+                <strong>{run.run_id}</strong>
+                <small>
+                  Agent {run.agent_version_id.slice(0, 12)} / {run.completed_cases}/
+                  {run.total_cases} 个用例 / {label(run.status)}
+                </small>
+              </div>
+            ))}
           </div>
           <div className="comparison-metrics">
             {comparison.metric_comparisons.map((item) => (
@@ -855,7 +1119,7 @@ function ComparisonGatePanel({
                 ) : (
                   item.points.map((point) => (
                     <span className="comparison-point" key={point.run_id}>
-                      {point.run_id.slice(0, 8)}：
+                      {point.run_id === comparison.baseline_run_id ? "基线" : "候选"}：
                       {point.pass_rate === null
                         ? "无评分"
                         : `${Math.round(point.pass_rate * 100)}%`}
@@ -867,6 +1131,7 @@ function ComparisonGatePanel({
                               : "positive"
                           }
                         >
+                          {comparisonDeltaLabel(point.delta_pass_rate)} {" "}
                           {point.delta_pass_rate >= 0 ? "+" : ""}
                           {(point.delta_pass_rate * 100).toFixed(1)} 个百分点
                         </b>
@@ -882,10 +1147,16 @@ function ComparisonGatePanel({
               <span className="section-kicker">新增失败</span>
               {comparison.new_failures.length ? (
                 comparison.new_failures.map((item) => (
-                  <p key={`${item.case_id}-${item.run_id}`}>
+                  <button
+                    className="change-case-button"
+                    key={`${item.case_id}-${item.run_id}`}
+                    onClick={() => onSelectCase(item.case_id)}
+                    type="button"
+                  >
                     <b>{item.case_id}</b>
                     {item.failed_metrics.join(", ") || "执行"}
-                  </p>
+                    <ChevronRight size={13} />
+                  </button>
                 ))
               ) : (
                 <p>没有新出现的失败用例。</p>
@@ -895,15 +1166,112 @@ function ComparisonGatePanel({
               <span className="section-kicker">恢复用例</span>
               {comparison.recovered_cases.length ? (
                 comparison.recovered_cases.map((item) => (
-                  <p key={`${item.case_id}-${item.run_id}`}>
+                  <button
+                    className="change-case-button"
+                    key={`${item.case_id}-${item.run_id}`}
+                    onClick={() => onSelectCase(item.case_id)}
+                    type="button"
+                  >
                     <b>{item.case_id}</b>
                     {item.failed_metrics.join(", ") || "执行"}
-                  </p>
+                    <ChevronRight size={13} />
+                  </button>
                 ))
               ) : (
                 <p>没有恢复的用例。</p>
               )}
             </div>
+          </div>
+          <div className="comparison-case-toolbar">
+            <span className="section-kicker">用例诊断</span>
+            <div className="search-field"><Search size={16} /><input value={comparisonSearch} onChange={(event) => { setComparisonSearch(event.target.value); setComparisonPage(0); }} aria-label="搜索比较用例" placeholder="搜索 Case ID 或首错类型" /></div>
+            <div className="case-filter-buttons" role="group" aria-label="比较用例筛选">
+              {(
+                [
+                  ["all", "全部"],
+                  ["regressed", "新增失败"],
+                  ["recovered", "恢复用例"],
+                ] as const
+              ).map(([value, text]) => (
+                <button
+                  className={comparisonFilter === value ? "active" : ""}
+                  key={value}
+                  onClick={() => { onFilter(value); setComparisonPage(0); }}
+                  type="button"
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="comparison-case-list">
+            {pagedComparisonCases.map((item) => {
+              const candidate = item.runs.find((run) => run.run_id === candidateRunId) ?? item.runs[1];
+              const changed = changedCaseIds.has(item.case_id);
+              return (
+                <button
+                  className={`comparison-case-row ${comparisonCaseId === item.case_id ? "selected" : ""}`}
+                  key={item.case_id}
+                  onClick={() => onSelectCase(item.case_id)}
+                  type="button"
+                >
+                  <span className={`case-change-mark ${changed && candidate?.failed ? "danger" : changed ? "success" : "neutral"}`}>
+                    {changed ? (candidate?.failed ? "回归" : "恢复") : "稳定"}
+                  </span>
+                  <span className="comparison-case-copy">
+                    <strong>{item.case_id}</strong>
+                    <small>{item.critical ? "关键任务" : "普通任务"} / {candidate ? label(candidate.execution_status) : "无执行记录"}</small>
+                  </span>
+                  <span className="comparison-case-diagnosis">
+                    {item.first_error ? diagnosisLabel(item.first_error.category) : "无首错诊断"}
+                  </span>
+                  <ChevronRight size={15} />
+                </button>
+              );
+            })}
+            {searchedComparisonCases.length === 0 && (
+              <p className="case-list-empty">没有符合当前筛选条件的比较用例。</p>
+            )}
+          </div>
+          {searchedComparisonCases.length > 0 && <div className="editor-actions"><button className="outline-button compact" type="button" disabled={comparisonPage === 0} onClick={() => setComparisonPage((value) => Math.max(0, value - 1))}>上一页</button><span className="detail-muted">{comparisonPage + 1} / {comparisonPageCount} 页，{searchedComparisonCases.length} 个 Case</span><button className="outline-button compact" type="button" disabled={comparisonPage + 1 >= comparisonPageCount} onClick={() => setComparisonPage((value) => Math.min(comparisonPageCount - 1, value + 1))}>下一页</button></div>}
+          {selectedComparisonCase && (
+            <ComparisonCaseDetail
+              item={selectedComparisonCase}
+              baselineRunId={comparison.baseline_run_id}
+              candidateRunId={candidateRunId}
+              onOpenCase={onOpenCase}
+            />
+          )}
+          {(missingEvidence.length > 0 || criticalTaskImpact.length > 0) && (
+            <div className="comparison-evidence-summary">
+              {missingEvidence.length > 0 && (
+                <div>
+                  <span className="section-kicker">缺失证据</span>
+                  {missingEvidence.map((item) => item.case_ids.length ? (
+                    <button className="change-case-button" type="button" key={`${item.run_id}-${item.metric_name}`} onClick={() => onSelectCase(item.case_ids[0])}>
+                      <b>{item.metric_name}</b>{item.run_id.slice(0, 12)} / {label(item.status)} / {item.case_ids.length} 个用例<ChevronRight size={13} />
+                    </button>
+                  ) : <p key={`${item.run_id}-${item.metric_name}`}>{item.run_id.slice(0, 12)} / {item.metric_name} / {label(item.status)} / 0 个用例</p>)}
+                </div>
+              )}
+              {criticalTaskImpact.map((item) => (
+                <div key={item.candidate_run_id}>
+                  <span className="section-kicker">关键任务影响</span>
+                  <p>
+                    候选失败 {item.candidate_failed_count}/{item.critical_case_count}，新增回归 {item.newly_regressed_case_ids.length} 个，恢复 {item.recovered_case_ids.length} 个
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="artifact-actions">
+            <span>导出本次比较，供 CI 或评审留档</span>
+            <button className="outline-button" onClick={() => onDownload("markdown")} type="button">
+              <Download size={14} /> Markdown
+            </button>
+            <button className="outline-button" onClick={() => onDownload("json")} type="button">
+              <FileJson size={14} /> JSON
+            </button>
           </div>
         </section>
       )}
@@ -956,6 +1324,29 @@ function ComparisonGatePanel({
             </span>{" "}
             要求所有用例通过
           </label>
+          <label className="gate-hard">
+            <input
+              type="checkbox"
+              checked={usePolicy}
+              onChange={(event) => onUsePolicy(event.target.checked)}
+            />
+            <span className="checkbox-mark">
+              <Check size={12} />
+            </span>{" "}
+            使用 YAML 门禁策略
+          </label>
+          {usePolicy && (
+            <label className="field-label gate-policy-editor">
+              策略 YAML
+              <textarea
+                value={gatePolicy}
+                onChange={(event) => onPolicy(event.target.value)}
+                rows={8}
+                spellCheck={false}
+              />
+              <small>策略会随本次评估解析；无效 YAML、未知指标或缺失证据不会通过门禁。</small>
+            </label>
+          )}
           <button
             className="primary"
             onClick={onGate}
@@ -965,23 +1356,138 @@ function ComparisonGatePanel({
           </button>
           {gateResult && (
             <div className={`gate-result ${statusTone(gateResult.status)}`}>
-              <StatusMark status={gateResult.status} />
+              <div className="gate-result-heading">
+                <StatusMark status={gateResult.status} />
+                {gateResult.status === "BLOCK" && <strong>此结果阻断发布</strong>}
+                {gateResult.policy_version && <small>策略 {gateResult.policy_version}</small>}
+              </div>
               {gateResult.rules.map((item) => (
-                <p key={`${item.rule.metric_name}-${item.rule.evaluator_version_id ?? "any"}`}>
-                  <b>
-                    {item.actual_value === null
+                <div className="gate-rule-result" key={`${item.rule.metric_name}-${item.rule.evaluator_version_id ?? "any"}`}>
+                  <div>
+                    <strong>{item.rule.metric_name}</strong>
+                    <StatusMark status={item.status} />
+                  </div>
+                  <p>
+                    实际值：{item.actual_value === null
                       ? "无结果"
                       : item.rule.aggregation === "pass_rate"
                         ? `${Math.round(item.actual_value * 100)}%`
                         : item.actual_value.toFixed(3)}
-                  </b>
-                  {item.reason ?? `${item.valid_count} 个有效评分`}
-                </p>
+                    <span>有效 {item.valid_count} / 缺失 {item.missing_count} / 错误 {item.error_count}</span>
+                  </p>
+                  {item.reason && <p>{item.reason}</p>}
+                  {item.failed_case_ids.length > 0 && (
+                    <div className="gate-failed-cases">
+                      <span>失败用例：</span>
+                      {item.failed_case_ids.map((caseId) => (
+                        <button
+                          className="gate-failed-case"
+                          key={caseId}
+                          onClick={() => onSelectCase(caseId)}
+                          type="button"
+                        >
+                          {caseId} <ExternalLink size={11} />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function ComparisonCaseDetail({
+  item,
+  baselineRunId,
+  candidateRunId,
+  onOpenCase,
+}: {
+  item: ComparisonCase;
+  baselineRunId: string;
+  candidateRunId: string;
+  onOpenCase: (runId: string, caseId: string) => void;
+}) {
+  const orderedRuns = [
+    item.runs.find((run) => run.run_id === baselineRunId),
+    item.runs.find((run) => run.run_id === candidateRunId),
+  ].filter((run): run is ComparisonRunCase => Boolean(run));
+
+  return (
+    <div className="comparison-case-detail">
+      <div className="comparison-case-detail-heading">
+        <div>
+          <span className="section-kicker">选中用例</span>
+          <strong>{item.case_id}</strong>
+        </div>
+        {item.critical && <span className="critical-badge">关键任务</span>}
+      </div>
+      {item.first_error && (
+        <div className="diagnosis-panel">
+          <div className="diagnosis-heading">
+            <ShieldAlert size={15} />
+            <strong>首错诊断：{diagnosisLabel(item.first_error.category)}</strong>
+          </div>
+          <p>{item.first_error.reason}</p>
+          <div className="diagnosis-identifiers">
+            <span>Baseline Span：{item.first_error.baseline_span_id ?? "无"}</span>
+            <span>Candidate Span：{item.first_error.candidate_span_id ?? "无"}</span>
+          </div>
+          {item.first_error.evidence.length > 0 && (
+            <details>
+              <summary>查看诊断证据</summary>
+              <pre>{displayValue(item.first_error.evidence)}</pre>
+            </details>
+          )}
+        </div>
+      )}
+      {!item.first_error && <p className="detail-muted">当前没有可对齐的首错诊断证据。</p>}
+      <div className="comparison-run-details">
+        {orderedRuns.map((run, index) => (
+          <article key={run.run_id}>
+            <div className="comparison-run-detail-heading">
+              <div>
+                <span className="section-kicker">{index === 0 ? "Baseline" : "Candidate"}</span>
+                <strong>{run.run_id}</strong>
+              </div>
+              <StatusMark status={run.failed ? "failed" : run.execution_status} />
+            </div>
+            {(run.error_type || run.error_message) && (
+              <div className="sample-error">
+                <ShieldAlert size={14} />
+                <span>{run.error_type ?? "执行错误"}：{run.error_message ?? "此运行失败。"}</span>
+              </div>
+            )}
+            <DetailBlock title="实际输出">
+              <pre>{displayValue(run.output)}</pre>
+            </DetailBlock>
+            <div className="comparison-score-list">
+              <span className="section-kicker">评分</span>
+              {run.scores.length > 0 ? run.scores.map((score) => (
+                <div key={score.id}>
+                  <span>{score.metric_name}</span>
+                  <StatusMark status={score.status} />
+                  <b>{score.value ?? score.label ?? "无值"}</b>
+                </div>
+              )) : <p className="detail-muted">没有评分证据。</p>}
+            </div>
+            <div className="trace-link-row">
+              <span>Trace：{run.trace_id ?? "无 Trace"}</span>
+              <button
+                className="trace-link"
+                onClick={() => onOpenCase(run.run_id, item.case_id)}
+                type="button"
+              >
+                {run.trace_id ? "查看 Trace / 报告" : "查看报告"} <ExternalLink size={12} />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1047,6 +1553,15 @@ function CaseDetail({
                   <pre>{displayValue(score.evidence)}</pre>
                 )}
                 {score.rubric && <small>评分标准：{score.rubric}</small>}
+                {score.provenance && (
+                  <small>Judge 版本：{displayValue(score.provenance)}</small>
+                )}
+                {score.raw_response !== null && (
+                  <details>
+                    <summary>原始 Judge 响应</summary>
+                    <pre>{displayValue(score.raw_response)}</pre>
+                  </details>
+                )}
               </article>
             ))
           ) : (

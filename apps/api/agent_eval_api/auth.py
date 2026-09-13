@@ -13,7 +13,8 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from agent_eval_api.db import ApiKeyRecord, get_session_factory
+from agent_eval_api.bootstrap import DEFAULT_PROJECT_ID, LEGACY_PROJECT_ID
+from agent_eval_api.db import ApiKeyRecord, ProjectRecord, get_session_factory, utc_now
 from agent_eval_api.settings import Settings, get_settings
 
 
@@ -30,14 +31,16 @@ def hash_project_key(raw_key: str, salt: str) -> str:
     return hmac.new(salt.encode(), raw_key.encode(), hashlib.sha256).hexdigest()
 
 
-def issue_project_key(project_id: str, settings: Settings) -> tuple[str, ApiKeyRecord]:
+def issue_project_key(
+    project_id: str, settings: Settings, *, name: str = "generated"
+) -> tuple[str, ApiKeyRecord]:
     """Create a key record and return the plaintext only to the caller once."""
 
     raw_secret = secrets.token_urlsafe(32)
     raw_key = f"aek_{project_id}_{raw_secret}"
     record = ApiKeyRecord(
         project_id=project_id,
-        name="generated",
+        name=name,
         key_hash=hash_project_key(raw_key, settings.api_key_salt.get_secret_value()),
         key_prefix=raw_key[:16],
     )
@@ -67,6 +70,14 @@ def require_project_access(
     db: Session = Depends(get_db),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> AuthContext:
+    # Resolve the project before checking a credential. This prevents a
+    # correctly shaped development session for a non-existent project from
+    # becoming an authenticated context.
+    if db.get(ProjectRecord, project_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid project"
+        )
+
     if x_project_key:
         key_hash = hash_project_key(x_project_key, settings.api_key_salt.get_secret_value())
         record = db.scalar(
@@ -80,11 +91,15 @@ def require_project_access(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid project key"
             )
+        record.last_used_at = utc_now()
+        db.commit()
         return AuthContext(project_id=project_id, principal_type="agent", credential_id=record.id)
 
-    if x_workspace_session and hmac.compare_digest(
-        x_workspace_session, issue_dev_session(project_id, settings)
-    ):
-        return AuthContext(project_id=project_id, principal_type="browser")
+    if x_workspace_session:
+        valid_sessions = [issue_dev_session(project_id, settings)]
+        if project_id == DEFAULT_PROJECT_ID:
+            valid_sessions.append(issue_dev_session(LEGACY_PROJECT_ID, settings))
+        if any(hmac.compare_digest(x_workspace_session, candidate) for candidate in valid_sessions):
+            return AuthContext(project_id=project_id, principal_type="browser")
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
