@@ -17,7 +17,7 @@ from tests.live.tool_dataset import (
 
 def test_tool_cases_have_explainable_business_evidence() -> None:
     validate_tool_cases()
-    assert len(TOOL_CASES) == 3
+    assert len(TOOL_CASES) == 5
     assert len({case["id"] for case in TOOL_CASES}) == len(TOOL_CASES)
     assert all(case["criteria"] for case in TOOL_CASES)
     assert all(case["expected_state"] for case in TOOL_CASES)

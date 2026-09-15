@@ -63,6 +63,7 @@ test("BLOCK 门禁可以打开失败 Case 的首错诊断", async ({ page }) => 
   await page.getByRole("button", { name: "比较运行", exact: true }).click();
   await expect(page.getByText("新增失败", { exact: true }).first()).toBeVisible();
   await page.getByText("使用 YAML 门禁策略", { exact: true }).click();
+  await page.getByPlaceholder("粘贴当前项目实际使用的 YAML 门禁策略").fill("version: test-v1\nrules:\n  - metric: task_success\n    aggregation: pass_rate\n    operator: gte\n    threshold: 0.9\n    severity: block");
   await page.getByRole("button", { name: "评估门禁", exact: true }).click();
   await expect(page.getByText("此结果阻断发布", { exact: true })).toBeVisible();
   await expect(page.getByText("首错诊断：工具参数", { exact: true })).toBeVisible();
@@ -169,6 +170,7 @@ test("比较与门禁忠实展示改善、持平、退化和证据不足状态",
   await expect(page.getByText("缺少可对齐的候选工具 Span，无法可靠定位首错。", { exact: true })).toBeVisible();
 
   await page.getByText("使用 YAML 门禁策略", { exact: true }).click();
+  await page.getByPlaceholder("粘贴当前项目实际使用的 YAML 门禁策略").fill("version: evidence-v1\nrules:\n  - metric: quality_regressed\n    aggregation: pass_rate\n    operator: gte\n    threshold: 0.9\n    severity: block");
   await page.getByRole("button", { name: "评估门禁", exact: true }).click();
   await expect(page.getByText("证据不完整", { exact: true }).last()).toBeVisible();
   await expect(page.getByText("候选运行缺少必需 Trace 证据。", { exact: true })).toBeVisible();

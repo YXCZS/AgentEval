@@ -41,8 +41,8 @@ Agent 是用户已经拥有的程序，例如会检索知识库的 RAG Agent、�
 
 ```powershell
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
-docker compose -f infra/docker-compose.yml up -d --build --wait
-docker compose -f infra/docker-compose.yml ps
+docker compose --env-file .env -f infra/docker-compose.yml up -d --build --wait
+docker compose --env-file .env -f infra/docker-compose.yml ps
 ```
 
 访问 <http://127.0.0.1:3000>。API 文档使用 `.env` 中的 `AGENT_EVAL_API_PORT`，例如端口为 `18080` 时访问 <http://127.0.0.1:18080/docs>；未设置时使用 Compose 默认端口 `8000`。默认 Compose 只有 Web、API、Worker、PostgreSQL、Redis；它没有测试 Agent 和预制数据。

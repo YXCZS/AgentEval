@@ -29,7 +29,7 @@
 | Trace | Canonical JSON、OpenInference-shaped JSON、OTLP HTTP JSON；Span 树、幂等、限流和脱敏 |
 | Dataset | UI/API 创建，支持 CSV/JSON/JSONL 预览导入和不可变 Version |
 | Experiment | 固定 Dataset Version、Agent Release、Evaluator Version 和执行参数 |
-| Evaluator | 任务成功、Schema、工具选择/参数、延迟、Token、成本等确定性指标 |
+| Evaluator | 任务成功、Schema、工具选择/参数、延迟、Token、成本等确定性指标；已验证 OpenAI-compatible 平台托管 LLM Judge |
 | 回归诊断 | 同一 Dataset Version 上比较 baseline/candidate，报告新增失败、恢复和首个分歧 |
 | 发布决策 | YAML Gate 输出 `PASS/WARNING/BLOCK/INCOMPLETE/INDETERMINATE` |
 | 工程交付 | FastAPI、PostgreSQL、Redis/Celery、Next.js、OpenAPI、Alembic、pytest、Playwright |
@@ -80,8 +80,8 @@ flowchart LR
 
 ```powershell
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
-docker compose -f infra/docker-compose.yml up -d --build --wait
-docker compose -f infra/docker-compose.yml ps
+docker compose --env-file .env -f infra/docker-compose.yml up -d --build --wait
+docker compose --env-file .env -f infra/docker-compose.yml ps
 ```
 
 打开 Web：<http://127.0.0.1:3000>。API 文档地址取决于 `.env` 中的 `AGENT_EVAL_API_PORT`，例如端口为 `18080` 时访问 <http://127.0.0.1:18080/docs>；未设置时使用 Compose 默认端口 `8000`。
@@ -166,6 +166,17 @@ npm run build
 Pop-Location
 ```
 
+真实 Provider/Agent 验收不会在普通 CI 中隐式执行，需要用户在未跟踪 `.env` 中配置真实凭据：
+
+```powershell
+python tests/live/provider_preflight.py
+python tests/live/run_tool_acceptance.py
+python tests/live/run_rag_evaluation_acceptance.py
+```
+
+真实验收结果和 Compose/重启恢复证据见
+[真实 Agent 验收记录](docs/real-acceptance-log-20260914.md)。
+
 ## 安全边界
 
 - `.env`、数据库、日志、构建缓存和本地 Artifact 被 Git 忽略，只提交 `.env.example`。
@@ -182,3 +193,4 @@ Pop-Location
 - [外部协议](docs/external-protocols.md)
 - [Trace 接入范围](docs/trace-ingestion.md)
 - [单机部署与运维](docs/operations.md)
+- [真实 Agent 验收记录](docs/real-acceptance-log-20260914.md)

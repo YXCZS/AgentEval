@@ -20,6 +20,7 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
+import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
 
 type RunStatus =
   "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
@@ -244,15 +245,11 @@ type GateResult = {
   generated_at: string;
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "default-project";
-const SESSION = process.env.NEXT_PUBLIC_WORKSPACE_SESSION ?? "";
-
 function requestHeaders(): HeadersInit {
   return { "Content-Type": "application/json", "X-Workspace-Session": SESSION };
 }
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetchApi(`${API_URL}${path}`, {
     ...init,
     headers: { ...requestHeaders(), ...init?.headers },
   });
@@ -387,7 +384,7 @@ function StatusMark({ status }: { status: string }) {
 type ReportMode = "report" | "compare" | "gate";
 
 export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMode }) {
-  const [mode, setMode] = useState<"report" | "compare">(initialMode === "report" ? "report" : "compare");
+  const [mode, setMode] = useState<ReportMode>(initialMode);
   const [summaries, setSummaries] = useState<ReportSummary[]>([]);
   const [runId, setRunId] = useState("");
   const [report, setReport] = useState<Report | null>(null);
@@ -409,9 +406,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
   const [gateHard, setGateHard] = useState(false);
   const [usePolicy, setUsePolicy] = useState(false);
   const [gateResult, setGateResult] = useState<GateResult | null>(null);
-  const [gatePolicy, setGatePolicy] = useState(
-    "version: local-v1\ngates:\n  - metric: task_success\n    operator: gte\n    threshold: 0.90\n    severity: block",
-  );
+  const [gatePolicy, setGatePolicy] = useState("");
   const [pendingCaseId, setPendingCaseId] = useState<string | null>(null);
   const timelineRequestRef = useRef<AbortController | null>(null);
 
@@ -558,6 +553,10 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
       setNotice(usePolicy ? "评估门禁前，请选择报告运行。" : "评估门禁前，请选择报告运行和指标。");
       return;
     }
+    if (usePolicy && !gatePolicy.trim()) {
+      setNotice("请输入当前项目实际使用的 YAML 门禁策略。");
+      return;
+    }
     const minimum = Number(gateMinimum);
     if (!usePolicy && !gateHard && (!Number.isFinite(minimum) || gateMinimum.trim() === "")) {
       setNotice("请输入数值型最低阈值，或要求所有用例通过。");
@@ -605,7 +604,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
     if (metric) params.set("metric", metric);
     if (executionStatus) params.set("execution_status", executionStatus);
     try {
-      const response = await fetch(
+      const response = await fetchApi(
         `${API_URL}/projects/${PROJECT_ID}/reports/${runId}/export?${params.toString()}`,
         { headers: requestHeaders() },
       );
@@ -644,7 +643,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
           : undefined
       : undefined;
     try {
-      const response = await fetch(
+      const response = await fetchApi(
         `${API_URL}/projects/${PROJECT_ID}/comparisons/artifact?format=${format}`,
         {
           method: "POST",
@@ -726,8 +725,16 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
         >
           <GitCompareArrows size={15} /> 比较与门禁
         </button>
+        <button
+          className={mode === "gate" ? "active" : ""}
+          onClick={() => setMode("gate")}
+          role="tab"
+          aria-selected={mode === "gate"}
+        >
+          <ShieldCheck size={15} /> 发布门禁
+        </button>
       </div>
-      {mode === "compare" ? (
+      {mode === "compare" || mode === "gate" ? (
         <ComparisonGatePanel
           summaries={summaries}
           selectedRunId={runId}
@@ -1341,6 +1348,7 @@ function ComparisonGatePanel({
               <textarea
                 value={gatePolicy}
                 onChange={(event) => onPolicy(event.target.value)}
+                placeholder="粘贴当前项目实际使用的 YAML 门禁策略"
                 rows={8}
                 spellCheck={false}
               />

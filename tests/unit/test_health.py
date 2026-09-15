@@ -27,3 +27,19 @@ def test_cors_allows_local_web_origin() -> None:
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:13000"
+
+
+def test_cors_allows_real_playwright_web_origin() -> None:
+    client = TestClient(create_app())
+
+    response = client.options(
+        "/projects/project-1/agents",
+        headers={
+            "Origin": "http://127.0.0.1:3002",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "x-workspace-session",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:3002"

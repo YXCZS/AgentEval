@@ -17,6 +17,7 @@ import {
   Target,
   XCircle,
 } from "lucide-react";
+import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
 
 type AgentType = "rag" | "tool" | "custom";
 type RunStatus = "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
@@ -103,16 +104,12 @@ type ExperimentPage = {
 type DatasetOption = DatasetVersion & { datasetId: string; datasetName: string; current: boolean };
 type Notice = { tone: "success" | "danger" | "neutral"; text: string };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "default-project";
-const SESSION = process.env.NEXT_PUBLIC_WORKSPACE_SESSION ?? "";
-
 function requestHeaders(): HeadersInit {
   return { "Content-Type": "application/json", "X-Workspace-Session": SESSION };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetchApi(`${API_URL}${path}`, {
     ...init,
     headers: { ...requestHeaders(), ...init?.headers },
     cache: "no-store",
@@ -287,9 +284,7 @@ export function RunsView({
     [datasetVersionId, experiments, run?.id],
   );
   const terminalCases = run
-    ? run.status === "cancelled"
-      ? run.total_cases
-      : run.completed_cases + run.failed_cases
+    ? Math.min(run.total_cases, run.completed_cases + run.failed_cases)
     : 0;
   const progress = run && run.total_cases > 0 ? Math.round((terminalCases / run.total_cases) * 100) : 0;
 

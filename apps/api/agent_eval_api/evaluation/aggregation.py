@@ -29,6 +29,15 @@ def aggregate_run_scores(
 ) -> list[AggregateMetricRecord]:
     """Rebuild aggregates from Score rows; missing data is never treated as passing."""
 
+    # Finalize requests and managed Judge workers can rebuild the same run at
+    # the same time. Serialize the delete/reinsert window on the run row so
+    # PostgreSQL cannot interleave two aggregate rebuilds and hit the unique
+    # (run_id, metric_name, evaluator_version_id) constraint.
+    db.scalar(
+        select(EvaluationRunRecord)
+        .where(EvaluationRunRecord.id == run.id)
+        .with_for_update()
+    )
     scores = db.scalars(
         select(ScoreRecord).where(ScoreRecord.run_id == run.id)
     ).all()

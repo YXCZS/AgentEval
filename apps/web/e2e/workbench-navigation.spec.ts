@@ -13,6 +13,11 @@ const navigation = [
 
 test("fresh project shows truthful SDK onboarding without creating data", async ({ page }) => {
   const requests: Array<{ method: string; path: string }> = [];
+  await page.route("**/health", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ status: "ok", environment: "test" }),
+  }));
   await page.route("**/projects/default-project/**", async (route) => {
     const request = route.request();
     requests.push({ method: request.method(), path: new URL(request.url()).pathname });
@@ -30,6 +35,7 @@ test("fresh project shows truthful SDK onboarding without creating data", async 
   });
 
   await page.goto("/");
+  await expect(page.locator(".system-status")).toContainText("API 已连接");
   await expect(page.getByRole("heading", { name: "从真实 SDK Experiment 开始" })).toBeVisible();
   await expect(page.getByText(/模型 Key 始终留在 Agent 进程中/)).toBeVisible();
   await expect(page.getByRole("button", { name: "配置 Release 与 Key" })).toBeVisible();
@@ -59,20 +65,21 @@ test("all workbench navigation and shell commands are interactive", async ({ pag
   await expect(page.locator(".page-content")).toBeVisible();
 
   if (testInfo.project.name === "desktop-chromium") {
-    await page.getByRole("button", { name: "切换工作区" }).click();
-    await expect(page.locator(".workspace-menu")).toContainText("当前连接 default-project");
-    await page.getByRole("button", { name: "打开个人菜单" }).click();
-    await expect(page.locator(".profile-menu")).toContainText("本地单人工作区");
+    await expect(page.getByLabel("当前项目")).toContainText("default-project");
+    await expect(page.getByLabel("当前运行模式")).toContainText("单项目模式");
   } else {
-    await expect(page.getByRole("button", { name: "切换工作区" })).toBeHidden();
-    await expect(page.getByRole("button", { name: "打开个人菜单" })).toBeHidden();
+    await expect(page.getByLabel("当前项目")).toBeHidden();
+    await expect(page.getByLabel("当前运行模式")).toBeHidden();
   }
 
   for (const label of navigation) {
-    await page.getByRole("button", { name: label, exact: true }).click();
+    await page.locator(".sidebar nav").getByRole("button", { name: label, exact: true }).click();
     await expect(page.locator(".breadcrumb strong")).toHaveText(label);
     await expect(page.locator(".page-content")).toBeVisible();
   }
+
+  await page.locator(".sidebar nav").getByRole("button", { name: "发布门禁", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "发布门禁" })).toHaveAttribute("aria-selected", "true");
 
   await page.getByRole("button", { name: "搜索导航" }).click();
   await page.getByRole("textbox", { name: "搜索导航" }).fill("回归分析");

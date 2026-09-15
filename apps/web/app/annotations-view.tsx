@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, CircleAlert, ClipboardCheck, Link2, LoaderCircle, Plus, RefreshCw, Save } from "lucide-react";
+import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
 
 type Evaluator = { id: string; name: string; version: string; evaluator_type: "deterministic" | "llm_judge" | "adapter" | "human"; rubric: string | null; enabled: boolean };
 type Experiment = { id: string; name: string; status: string; created_at: string };
@@ -12,16 +13,12 @@ type QueueItem = { id: string; queue_id: string; run_id: string; case_id: string
 type Score = { id: string; value: number | null; label: string | null; passed: boolean | null; explanation: string | null; evidence: Array<Record<string, unknown>> };
 type Audit = { id: string; action: "created" | "updated"; reviewer: string; previous_value: Record<string, unknown> | null; new_value: Record<string, unknown>; created_at: string };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "default-project";
-const SESSION = process.env.NEXT_PUBLIC_WORKSPACE_SESSION ?? "";
-
 function headers(): HeadersInit {
   return { "Content-Type": "application/json", "X-Workspace-Session": SESSION };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, { ...init, headers: { ...headers(), ...init?.headers } });
+  const response = await fetchApi(`${API_URL}${path}`, { ...init, headers: { ...headers(), ...init?.headers } });
   const body = (await response.json().catch(() => null)) as T | { detail?: unknown } | null;
   if (!response.ok) {
     const detail = body && typeof body === "object" && "detail" in body ? body.detail : null;

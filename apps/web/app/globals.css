@@ -30,7 +30,7 @@ body {
   min-width: 320px;
   background: var(--mid);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
   font-size: 14px;
   line-height: 1.45;
 }
@@ -59,7 +59,7 @@ h1,
 h2,
 h3,
 h4 {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Segoe UI Variable Display", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
   font-weight: 600;
   letter-spacing: 0;
 }
@@ -132,7 +132,7 @@ pre,
   color: var(--muted);
   font-size: 11px;
 }
-.workspace-switcher {
+.workspace-current {
   position: relative;
   display: block;
   width: calc(100% - 12px);
@@ -143,54 +143,17 @@ pre,
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   text-align: left;
-  transition:
-    background 0.2s ease-out,
-    border-color 0.2s ease-out,
-    color 0.2s ease-out;
 }
-.workspace-switcher:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: var(--line-strong);
-}
-.workspace-switcher span {
+.workspace-current span {
   display: block;
   color: var(--muted);
   font-size: 10px;
 }
-.workspace-switcher strong {
+.workspace-current strong {
   display: block;
   margin-top: 4px;
   font-size: 13px;
   font-weight: 600;
-}
-.workspace-switcher svg {
-  position: absolute;
-  right: 10px;
-  bottom: 11px;
-  color: var(--subtle);
-}
-.workspace-menu,
-.profile-menu {
-  position: absolute;
-  z-index: 5;
-  display: grid;
-  gap: 4px;
-  padding: 10px 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 11px;
-}
-.workspace-menu {
-  top: 91px;
-  left: 20px;
-  right: 20px;
-}
-.workspace-menu span,
-.profile-menu span {
-  color: var(--muted);
-  font-size: 10px;
 }
 .sidebar nav {
   display: grid;
@@ -254,11 +217,17 @@ pre,
     Menlo,
     monospace;
 }
-.pulse {
+.status-dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: 2px;
   background: var(--success);
+}
+.system-status.checking .status-dot {
+  background: var(--warning);
+}
+.system-status.unavailable .status-dot {
+  background: var(--danger);
 }
 .profile {
   position: relative;
@@ -288,37 +257,6 @@ pre,
   margin-top: 2px;
   color: var(--muted);
   font-size: 10px;
-}
-.more-dots {
-  display: flex;
-  gap: 3px;
-}
-.more-dots i {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--muted);
-}
-.more-dots-button {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  margin-left: auto;
-  padding: 0 7px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-}
-.more-dots-button:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-.more-dots-button .more-dots {
-  margin-left: 0;
-}
-.profile-menu {
-  right: 0;
-  bottom: 43px;
-  min-width: 140px;
 }
 
 .main-content {
@@ -465,10 +403,10 @@ h3 {
 
 .welcome-band {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  min-height: 215px;
-  padding: 30px 32px;
+  min-height: 132px;
+  padding: 24px 28px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
@@ -477,9 +415,8 @@ h3 {
   color: var(--blue);
 }
 .welcome-band h1 {
-  max-width: 620px;
-  margin-bottom: 14px;
-  font-size: 42px;
+  margin-bottom: 8px;
+  font-size: 30px;
 }
 .welcome-band h1 span {
   color: var(--text);
@@ -490,20 +427,6 @@ h3 {
   color: var(--subtle);
   font-size: 13px;
   line-height: 1.65;
-}
-.welcome-mark {
-  align-self: center;
-  display: grid;
-  justify-items: center;
-  gap: 9px;
-  color: var(--muted);
-  font:
-    11px SFMono-Regular,
-    Menlo,
-    monospace;
-}
-.welcome-mark span {
-  color: var(--blue);
 }
 .metric-grid {
   display: grid;
@@ -1004,17 +927,17 @@ h3 {
   display: block;
 }
 .evaluator-list-item b {
-  font-size: 10px;
+  font-size: 12px;
 }
 .evaluator-list-item small {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 .evaluator-list-item i {
   flex: 0 0 auto;
   color: var(--blue);
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
 }
 .evaluator-list-item i.disabled {
@@ -1077,7 +1000,7 @@ h3 {
 .trace-meta-grid span,
 .connection-meta-grid span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 .detail-stat-grid strong,
 .trace-meta-grid strong,
@@ -1085,7 +1008,7 @@ h3 {
   margin-top: 5px;
   overflow: hidden;
   color: var(--text);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2170,7 +2093,7 @@ textarea::placeholder {
   .brand {
     padding-bottom: 14px;
   }
-  .workspace-switcher {
+  .workspace-current {
     display: none;
   }
   .sidebar nav {

@@ -227,7 +227,7 @@ def _validate_experiment_trace(
         )
     if run.execution_mode == "otel":
         return _validate_otel_experiment_trace(db, project_id, trace, attributes, run)
-    if run.execution_mode == "remote_upload":
+    if run.execution_mode in {"remote_upload", "remote_trigger"}:
         return _validate_otel_experiment_trace(
             db,
             project_id,

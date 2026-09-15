@@ -10,6 +10,7 @@ import {
   Plus,
   Save,
 } from "lucide-react";
+import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
 
 type EvaluatorType = "deterministic" | "llm_judge" | "adapter" | "human";
 type AgentType = "rag" | "tool" | "custom";
@@ -48,9 +49,6 @@ type ProviderConnection = {
   status: "pending_validation" | "active" | "error" | "disabled";
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "default-project";
-const SESSION = process.env.NEXT_PUBLIC_WORKSPACE_SESSION ?? "";
 const evaluatorTypeLabels: Record<EvaluatorType, string> = {
   deterministic: "确定性规则",
   llm_judge: "LLM Judge",
@@ -68,7 +66,7 @@ function headers(): HeadersInit {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetchApi(`${API_URL}${path}`, {
     ...init,
     headers: { ...headers(), ...init?.headers },
   });

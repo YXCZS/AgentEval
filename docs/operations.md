@@ -25,8 +25,8 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 ## 启动与检查
 
 ```powershell
-docker compose -f infra/docker-compose.yml up -d --build --wait
-docker compose -f infra/docker-compose.yml ps
+docker compose --env-file .env -f infra/docker-compose.yml up -d --build --wait
+docker compose --env-file .env -f infra/docker-compose.yml ps
 $apiPort = if ($env:AGENT_EVAL_API_PORT) { $env:AGENT_EVAL_API_PORT } else { "8000" }
 Invoke-WebRequest "http://127.0.0.1:$apiPort/health"
 ```
@@ -38,8 +38,8 @@ Invoke-WebRequest "http://127.0.0.1:$apiPort/health"
 查看日志和停止服务：
 
 ```powershell
-docker compose -f infra/docker-compose.yml logs --tail=200 api worker
-docker compose -f infra/docker-compose.yml down
+docker compose --env-file .env -f infra/docker-compose.yml logs --tail=200 api worker
+docker compose --env-file .env -f infra/docker-compose.yml down
 ```
 
 MVP 的用户 Agent 不由平台 Worker 逐 Case 调用。Worker 启动时不会注册旧的 `agent_eval.execute_case`；SDK Experiment 必须从用户 Agent 进程启动。
@@ -48,7 +48,7 @@ MVP 的用户 Agent 不由平台 Worker 逐 Case 调用。Worker 启动时不会
 
 ```powershell
 python -m alembic heads
-docker compose -f infra/docker-compose.yml exec -T api alembic current
+docker compose --env-file .env -f infra/docker-compose.yml exec -T api alembic current
 ```
 
 破坏性升级前按 [数据库迁移演练](database-migration-rehearsal.md) 完成备份与恢复验证。
@@ -58,8 +58,8 @@ docker compose -f infra/docker-compose.yml exec -T api alembic current
 ### API 不健康
 
 ```powershell
-docker compose -f infra/docker-compose.yml logs --tail=200 api postgres
-docker compose -f infra/docker-compose.yml exec -T api alembic current
+docker compose --env-file .env -f infra/docker-compose.yml logs --tail=200 api postgres
+docker compose --env-file .env -f infra/docker-compose.yml exec -T api alembic current
 ```
 
 确认 `DATABASE_URL` 使用 Compose 服务名 `postgres`，并检查迁移是否被其他进程占用。

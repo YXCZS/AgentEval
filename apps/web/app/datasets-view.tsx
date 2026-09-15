@@ -21,6 +21,7 @@ import {
   Webhook,
   X,
 } from "lucide-react";
+import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
 
 type JsonValue = unknown;
 type Mode = "manual" | "import";
@@ -46,10 +47,6 @@ type Preview = { cases: DatasetCase[]; issues: ImportIssue[] };
 type RemoteTrigger = { id: string; project_id: string; dataset_id: string; trigger_url: string; enabled: boolean; signature_header: string; secret_mask: string; secret_key_id: string; created_at: string; updated_at: string };
 type RemoteTriggerCreated = RemoteTrigger & { signing_secret: string };
 type RemoteTriggerDelivery = { id: string; experiment_id: string; delivery_id: string; status: "pending" | "delivering" | "accepted" | "rejected" | "failed"; attempt_count: number; last_http_status: number | null; last_error_type: string | null; last_error_message: string | null; accepted_at: string | null; created_at: string; updated_at: string };
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "default-project";
-const SESSION = process.env.NEXT_PUBLIC_WORKSPACE_SESSION ?? "";
 
 const emptyCase = (): ManualCase => ({
   id: `case-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -84,7 +81,7 @@ function headers(json = true): HeadersInit {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, { ...init, headers: { ...headers(), ...init?.headers } });
+  const response = await fetchApi(`${API_URL}${path}`, { ...init, headers: { ...headers(), ...init?.headers } });
   const body = (await response.json().catch(() => null)) as T | { detail?: unknown } | null;
   if (!response.ok) {
     const detail = body && typeof body === "object" && "detail" in body ? body.detail : null;
@@ -315,7 +312,7 @@ function RemoteTriggerPanel({ dataset }: { dataset: Dataset }) {
     setBusy(true);
     setMessage("");
     try {
-      const response = await fetch(`${API_URL}/projects/${PROJECT_ID}/datasets/${dataset.id}/remote-trigger`, { headers: headers() });
+      const response = await fetchApi(`${API_URL}/projects/${PROJECT_ID}/datasets/${dataset.id}/remote-trigger`, { headers: headers() });
       if (response.status === 404) { setTrigger(null); setDeliveries([]); return; }
       const body = await response.json() as RemoteTrigger;
       if (!response.ok) throw new Error("加载 Remote Trigger 失败。");
@@ -350,9 +347,9 @@ function RemoteTriggerPanel({ dataset }: { dataset: Dataset }) {
   }
 
   const receiverConfig = [
-    `AGENT_EVAL_TRIGGER_URL=${trigger?.trigger_url ?? "https://runner.example.com/agent-eval/trigger"}`,
+    `AGENT_EVAL_TRIGGER_URL=${trigger?.trigger_url ?? "<由运行器提供的 HTTPS URL>"}`,
     `AGENT_EVAL_TRIGGER_SIGNATURE_HEADER=${trigger?.signature_header ?? "X-Agent-Eval-Trigger-Signature"}`,
-    "AGENT_EVAL_TRIGGER_SECRET=$AGENT_EVAL_TRIGGER_SECRET",
+    "AGENT_EVAL_TRIGGER_SECRET=<创建 Trigger 后保存的一次性密钥>",
   ].join("\n");
   return <section className="remote-trigger-panel"><div className="dataset-trigger-heading"><div><span className="section-kicker"><Webhook size={14} /> Remote Trigger</span><strong>远程运行器</strong><small>仅在创建 Remote Trigger Experiment 时向该运行器发送一次签名通知，不会逐条调用 Agent。</small></div><button type="button" className="outline-button compact" onClick={() => { setOneTimeSecret(""); void loadTrigger(); }} disabled={busy}><RefreshCw size={14} className={busy ? "spin" : ""} /> 刷新</button></div>{message && <p className="trigger-message" role="status">{message}</p>}{!trigger ? <div className="trigger-form"><label className="field-label">远程运行器 URL<input aria-label="远程运行器 URL" value={triggerUrl} onChange={(event) => setTriggerUrl(event.target.value)} placeholder="https://runner.example.com/agent-eval/trigger" /></label><div className="editor-actions"><span className="muted-helper">URL 不能包含认证信息、查询参数或片段。</span><button type="button" className="outline-button" onClick={() => void createTrigger()} disabled={busy}><Webhook size={15} /> 创建 Trigger</button></div></div> : <><div className="trigger-meta"><div><span>接收 URL</span><strong>{trigger.trigger_url}</strong></div><div><span>签名头</span><strong>{trigger.signature_header}</strong></div><div><span>密钥</span><strong>{trigger.secret_mask}</strong></div><label className="check-line"><input type="checkbox" checked={trigger.enabled} onChange={(event) => void setEnabled(event.target.checked)} disabled={busy} /> 已启用</label></div>{oneTimeSecret && <div className="secret-once-notice"><strong>一次性签名密钥</strong><span>仅在本次创建后显示，刷新或离开页面后无法再次读取。</span><pre>{oneTimeSecret}</pre><button type="button" className="outline-button compact" onClick={() => void copy(oneTimeSecret, "一次性签名密钥已复制。")}><Clipboard size={14} /> 复制密钥</button></div>}<div className="detail-block"><h3>运行器配置模板</h3><pre className="integration-snippet">{receiverConfig}</pre><button type="button" className="outline-button compact" onClick={() => void copy(receiverConfig, "不含密钥的运行器配置已复制。")}><Clipboard size={14} /> 复制配置</button></div><div className="trigger-deliveries"><h3>最近投递</h3>{deliveries.length ? deliveries.slice(0, 5).map((delivery) => <div key={delivery.id}><strong>{delivery.status}</strong><span>{delivery.experiment_id} · 尝试 {delivery.attempt_count}{delivery.last_http_status ? ` · HTTP ${delivery.last_http_status}` : ""}</span></div>) : <p className="muted-helper">还没有投递。webhook 返回 2xx 只表示运行器已收到通知，不代表 Experiment 已完成。</p>}</div></>}</section>;
 }

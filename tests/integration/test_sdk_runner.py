@@ -830,14 +830,16 @@ def test_live_tool_baseline_candidate_full_platform_workflow(
                 )
 
             if "current status" in user_content:
-                tool_name, order_id = "lookup_order_status", "ORDER-1001"
+                tool_name = "lookup_order_status"
             elif "cancel" in user_content:
-                tool_name, order_id = (
-                    "check_cancellation_eligibility",
-                    "ORDER-1002",
-                )
+                tool_name = "check_cancellation_eligibility"
             else:
-                tool_name, order_id = "check_refund_eligibility", "ORDER-1003"
+                tool_name = "check_refund_eligibility"
+            order_id = next(
+                order_id
+                for order_id in ("ORDER-1001", "ORDER-1002", "ORDER-1003", "ORDER-9999")
+                if order_id in user_content
+            )
             call = SimpleNamespace(
                 id=f"call-scripted-{self.request_count}",
                 type="function",
@@ -935,12 +937,12 @@ def test_live_tool_baseline_candidate_full_platform_workflow(
     assert baseline.experiment.dataset_version_id == resources.dataset_version_id
     assert candidate.experiment.dataset_version_id == resources.dataset_version_id
     assert candidate.experiment.baseline_run_id == baseline.experiment.id
-    assert len(attempts) == 6
+    assert len(attempts) == 10
     assert all(
         attempt.status == "completed" and attempt.evidence_status == "complete"
         for attempt in attempts
     )
-    assert len(scores) == 18
+    assert len(scores) == 30
     failed_scores = [
         {
             "run_id": score.run_id,
@@ -955,8 +957,8 @@ def test_live_tool_baseline_candidate_full_platform_workflow(
         if score.status != "passed" or score.value != 1
     ]
     assert failed_scores == []
-    assert len(traces) == 6
-    assert scripted.request_count == 12
+    assert len(traces) == 10
+    assert scripted.request_count == 20
 
     comparison = api.post(
         "/projects/project-1/comparisons",

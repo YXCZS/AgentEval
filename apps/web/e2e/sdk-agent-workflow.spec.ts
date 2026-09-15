@@ -126,7 +126,7 @@ test("acceptance resource IDs open persisted Experiment and Trace details", asyn
   await expect(page).toHaveURL(/view=traces&trace_id=trace-1/);
 });
 
-test("cancelled SDK Experiment shows every unclaimed Case as terminal", async ({ page }) => {
+test("cancelled SDK Experiment does not count unclaimed Cases as executed", async ({ page }) => {
   const queuedRun = { ...run, status: "queued", completed_cases: 0, failed_cases: 0 };
   const emptyManifest = {
     ...manifest,
@@ -153,8 +153,8 @@ test("cancelled SDK Experiment shows every unclaimed Case as terminal", async ({
   await page.getByRole("button", { name: "实验", exact: true }).click();
   await page.getByRole("button", { name: "取消 Experiment", exact: true }).click();
   await expect(page.getByText("Experiment 已取消，未执行此 Case。", { exact: true })).toBeVisible();
-  await expect(page.getByText("1 / 1 个 Item 已终态", { exact: true })).toBeVisible();
-  await expect(page.getByText("100%", { exact: true })).toBeVisible();
+  await expect(page.getByText("0 / 1 个 Item 已终态", { exact: true })).toBeVisible();
+  await expect(page.getByText("0%", { exact: true })).toBeVisible();
 });
 
 test("running SDK Experiment refreshes persisted Item progress", async ({ page }) => {

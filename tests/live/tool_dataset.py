@@ -13,7 +13,7 @@ DATASET_NAME = "Live Tool Agent acceptance"
 DATASET_DESCRIPTION = (
     "Controlled, side-effect-free order support cases for real model Tool Agent acceptance."
 )
-DATASET_SCHEMA_VERSION = "1.0.0"
+DATASET_SCHEMA_VERSION = "1.1.0"
 
 TOOL_CASES: list[dict[str, Any]] = [
     {
@@ -82,6 +82,49 @@ TOOL_CASES: list[dict[str, Any]] = [
             "A delivery from 5 days ago is inside the controlled 30-day refund window.",
         ],
         "metadata": {"business_rule": "refund_eligibility", "tool_required": True},
+    },
+    {
+        "id": "cancel-processing-order",
+        "input": {
+            "order_id": "ORDER-1001",
+            "request": "Please cancel this order before it is shipped.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_cancellation_eligibility",
+                "arguments": {"order_id": "ORDER-1001"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "processing", "eligible": True},
+        "criteria": [
+            "Check cancellation eligibility before claiming that an order can be cancelled.",
+            "A processing order is eligible under the controlled business rules.",
+        ],
+        "metadata": {
+            "business_rule": "cancellation_eligibility",
+            "tool_required": True,
+        },
+    },
+    {
+        "id": "status-unknown-order",
+        "input": {
+            "order_id": "ORDER-9999",
+            "request": "What is the current status of this order?",
+        },
+        "expected_tools": [
+            {
+                "name": "lookup_order_status",
+                "arguments": {"order_id": "ORDER-9999"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "not_found", "found": False},
+        "criteria": [
+            "Use the read-only status tool even when the order may not exist.",
+            "Report that the order was not found without inventing a status.",
+        ],
+        "metadata": {"business_rule": "unknown_order", "tool_required": True},
     },
 ]
 

@@ -1,7 +1,8 @@
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from sqlalchemy import text
 from starlette.middleware.base import RequestResponseEndpoint
 
 from agent_eval_api.adapter_capabilities import router as adapter_capabilities_router
@@ -13,6 +14,7 @@ from agent_eval_api.comparisons import router as comparisons_router
 from agent_eval_api.contracts import AccessCheckResponse, HealthResponse, SdkContractResponse
 from agent_eval_api.credential_encryption import validate_runtime_credential_configuration
 from agent_eval_api.datasets import router as datasets_router
+from agent_eval_api.db import get_session_factory
 from agent_eval_api.evaluation_runs import experiments_router
 from agent_eval_api.evaluation_runs import router as evaluation_runs_router
 from agent_eval_api.evaluator_connections import router as evaluator_connections_router
@@ -40,6 +42,8 @@ def create_app() -> FastAPI:
             "http://127.0.0.1:3000",
             "http://localhost:3001",
             "http://127.0.0.1:3001",
+            "http://localhost:3002",
+            "http://127.0.0.1:3002",
             "http://localhost:13000",
             "http://127.0.0.1:13000",
         ],
@@ -106,7 +110,25 @@ def create_app() -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     def health() -> HealthResponse:
+        """Return process liveness without requiring backing services."""
+
         settings = get_settings()
+        return HealthResponse(status="ok", environment=settings.app_env)
+
+    @app.get("/ready", response_model=HealthResponse, tags=["system"])
+    def readiness() -> HealthResponse:
+        """Return readiness only when the configured database accepts queries."""
+
+        settings = get_settings()
+        session = None
+        try:
+            session = get_session_factory()()
+            session.execute(text("SELECT 1"))
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="database unavailable") from exc
+        finally:
+            if session is not None:
+                session.close()
         return HealthResponse(status="ok", environment=settings.app_env)
 
     @app.get(

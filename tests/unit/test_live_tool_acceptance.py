@@ -185,7 +185,7 @@ def test_acceptance_uses_one_dataset_version_and_persisted_run_ids(
                     evidence_status="complete",
                     trace_id=f"trace-{'candidate' if is_candidate else 'baseline'}-{index}",
                 )
-                for index in range(3)
+                for index in range(5)
             ],
         )
 
@@ -228,7 +228,7 @@ def test_acceptance_uses_one_dataset_version_and_persisted_run_ids(
         "/runs/experiment-candidate/regression-gate"
     )
     assert result.experiments["evidence_complete"] is True
-    assert len(get_calls) == 9
+    assert len(get_calls) == 13
     assert get_calls[:3] == [
         "/projects/project-1/datasets/dataset-live/versions/dataset-version-frozen",
         "/projects/project-1/experiments/experiment-baseline",
@@ -238,9 +238,13 @@ def test_acceptance_uses_one_dataset_version_and_persisted_run_ids(
         "trace-baseline-0",
         "trace-baseline-1",
         "trace-baseline-2",
+        "trace-baseline-3",
+        "trace-baseline-4",
         "trace-candidate-0",
         "trace-candidate-1",
         "trace-candidate-2",
+        "trace-candidate-3",
+        "trace-candidate-4",
     ]
     assert result.verified_resources["workbench_links"]["Candidate Experiment"] == (
         "/?view=runs&run_id=experiment-candidate"

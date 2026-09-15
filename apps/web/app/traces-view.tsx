@@ -17,6 +17,7 @@ import {
   Workflow,
   XCircle,
 } from "lucide-react";
+import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
 
 type ExecutionStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 type TraceSummary = {
@@ -106,9 +107,6 @@ type DatasetVersion = { id: string; dataset_id: string; version: number; cases: 
 type TraceField = "input" | "output" | "attributes" | "extensions";
 type FieldSelection = { span_id: string; field: TraceField; attribute_key?: string };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "default-project";
-const SESSION = process.env.NEXT_PUBLIC_WORKSPACE_SESSION ?? "";
 const statusLabels: Record<ExecutionStatus, string> = {
   queued: "排队中",
   running: "运行中",
@@ -136,7 +134,7 @@ function requestHeaders(): HeadersInit {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetchApi(`${API_URL}${path}`, {
     ...init,
     headers: { ...requestHeaders(), ...init?.headers },
   });

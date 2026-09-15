@@ -79,7 +79,7 @@
 - [x] 9.4 使用同一 Dataset Version 分别运行 baseline 和 candidate Release，执行评分、比较、归因和 Gate，并验证平台忠实报告改善、持平、退化或不确定结果。
 - [x] 9.5 生成脱敏 MVP 验收摘要，包含时间、provider/model、Release、Dataset Version、Experiment ID 与证据检查，并验证页面可按 ID 打开对应持久化数据。
 - [x] 9.6 仅在未跟踪 `.env` 配置用户提供的真实值并成功运行 Tool lane；没有真实上游成功和完整证据时本任务保持未完成。
-- [x] 9.7 运行后端/SDK/Worker/前端/Playwright 测试、生产 Compose 单机启动、重启恢复和 tracked-file 密钥扫描；全部通过后才允许声明“SDK Tool Agent MVP 完成”。
+- [x] 9.7 运行后端/SDK/Worker/前端/Playwright 测试、生产 Compose 单机启动、重启恢复和 tracked-file 密钥扫描；全部通过后才允许声明“SDK Tool Agent MVP 完成”。2026-09-15 已在真实 Docker Compose 上完成 Tool SDK、OTel、Remote Upload、Remote Trigger、单 Case 失败隔离和重启恢复验收；后端/SDK/Worker/前端检查与密钥扫描均通过。
 
 ## 10. V1.1：真实 RAG 与平台托管 LLM Judge
 
@@ -92,8 +92,8 @@
 - [x] 10.7 保留签名外部 Evaluator 适配器并统一 Provider/外部 Judge provenance，验证正常 LLM Judge 不要求用户另行部署服务。
 - [x] 10.8 完成 Provider 创建/测试/轮换/禁用/删除和 Judge 绑定页面，并验证提交后明文 Key 从浏览器状态和响应中消失。
 - [x] 10.9 实现真实 embedding、向量相似度检索和真实回答生成的 RAG live task，并验证 RETRIEVER/LLM Span、文档 ID 和上游 usage 入库。
-- [x] 10.10 创建版本化 RAG Dataset、客观断言和真实 Provider Judge，运行 baseline/candidate、Comparison 与 Gate，并验证没有硬编码实际答案或强制 BLOCK。
-- [x] 10.11 使用未跟踪真实 Key 成功运行 Tool 与 RAG 两条 lane 并生成脱敏摘要；两条真实链路均完整前不得声明“完整真实业务验收”。
+- [x] 10.10 创建版本化 RAG Dataset、客观断言和真实 Provider Judge，运行 baseline/candidate、Comparison 与 Gate，并验证没有硬编码实际答案或强制 BLOCK。已在统一 SQLite schema、Redis DB 和 Worker 配置下完成真实 RAG baseline/candidate、托管 Judge、Comparison 与 Gate 验收；实际结果为两边持平，Gate 为 `passed`。
+- [x] 10.11 使用未跟踪真实 Key 成功运行 Tool 与 RAG 两条 lane 并生成脱敏摘要；两条真实链路均完整前不得声明“完整真实业务验收”。Tool 与 RAG 均已使用未跟踪真实 Key 完成，验收摘要只保存脱敏 provider/model、资源 ID、评分状态和 Gate 结果。
 
 ## 11. V1.2：独立 OTel、语言无关 Remote 与签名 Trigger
 
@@ -111,7 +111,7 @@
 - [x] 12.1 完善 Annotation Queue、人工评分审计与外部 Judge 证据导航，并验证所有人工修改保留 reviewer、前后值和时间。
 - [x] 12.2 完善 Experiment/Trace/Comparison/Gate 的筛选、分页、缺失证据和高级归因体验，并验证所有统计均来自 API 持久化数据。
 - [x] 12.3 对桌面和移动尺寸运行全部主按钮、对话框和导航 Playwright 覆盖，并验证不存在无响应控件或 Demo 服务依赖。
-- [x] 12.4 从干净 checkout 启动生产 Compose，依次验证 SDK、OTel、Remote Upload、Trigger、Provider Judge、Comparison 和 Gate，重启后状态保留且单 Case 失败隔离。
+- [x] 12.4 从干净 checkout 启动生产 Compose，依次验证 SDK、OTel、Remote Upload、Trigger、Provider Judge、Comparison 和 Gate，重启后状态保留且单 Case 失败隔离。2026-09-15 已使用真实 DeepSeek Chat、阿里云百炼 text-embedding-v4 和 Compose API/Worker/PostgreSQL/Redis 完成全链路验收；SDK Tool、OTel、Remote Upload、Remote Trigger、Provider Judge、Comparison、Gate、重启恢复和失败隔离均通过。
 - [x] 12.5 运行完整后端/SDK/Worker/前端测试和迁移兼容测试，修复现存静态类型问题，并验证非 live 测试不要求也不替换真实模型。
-- [x] 12.6 执行 tracked-file、Git-history-aware 密钥扫描并人工检查 `.env.example`、日志和生成物，验证没有真实 Key、加密主密钥、授权头、私有响应或 `.env` 被跟踪。
-- [x] 12.7 对齐 README 功能声明、OpenSpec 勾选和实际执行证据；任何未运行的 live 要求保持未完成，最终完整验收通过后再归档变更。
+- [x] 12.6 执行 tracked-file、Git-history-aware 密钥扫描并人工检查 `.env.example`、日志和生成物，验证没有真实 Key、加密主密钥、授权头、私有响应或 `.env` 被跟踪。已完成工作树、Git 历史、跟踪文件名、`.env.example` 和生成物扫描；命中内容均为测试假值或协议示例。
+- [x] 12.7 对齐 README 功能声明、OpenSpec 勾选和实际执行证据；任何未运行的 live 要求保持未完成，最终完整验收通过后再归档变更。2026-09-15 已同步 README、验收记录和任务状态；Docker Compose、真实多入口链路、重启恢复与全量检查均有执行证据。

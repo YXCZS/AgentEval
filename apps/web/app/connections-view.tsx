@@ -17,6 +17,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
 
 type AgentType = "rag" | "tool" | "custom";
 type Release = {
@@ -64,9 +65,6 @@ type ProviderTest = {
 };
 type Notice = { tone: "success" | "danger" | "neutral"; text: string };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "default-project";
-const SESSION = process.env.NEXT_PUBLIC_WORKSPACE_SESSION ?? "";
 const typeLabels: Record<AgentType, string> = {
   rag: "RAG Agent",
   tool: "Tool Agent",
@@ -78,7 +76,7 @@ function headers(): HeadersInit {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetchApi(`${API_URL}${path}`, {
     ...init,
     headers: { ...headers(), ...init?.headers },
     cache: "no-store",

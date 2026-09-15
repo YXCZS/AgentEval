@@ -1,5 +1,6 @@
 services:
   web:
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
@@ -12,8 +13,14 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   api:
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
@@ -34,12 +41,13 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
       interval: 5s
       timeout: 3s
       retries: 12
 
   worker:
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: apps/worker/Dockerfile
@@ -57,8 +65,14 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A agent_eval_worker.celery_app:celery_app inspect ping --timeout=3 | grep -q pong"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
 
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     ports:
       - "5432:5432"
@@ -75,6 +89,7 @@ services:
       retries: 12
 
   redis:
+    restart: unless-stopped
     image: redis:7-alpine
     ports:
       - "6379:6379"

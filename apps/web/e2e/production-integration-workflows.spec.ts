@@ -76,7 +76,7 @@ test("Dataset Remote Trigger exposes a one-time signing secret but never returns
   await page.getByLabel("远程运行器 URL").fill(trigger.trigger_url);
   await page.getByRole("button", { name: "创建 Trigger", exact: true }).click();
   await expect(page.getByText("created-once-test-value", { exact: true })).toBeVisible();
-  await expect(page.locator(".integration-snippet")).toContainText("AGENT_EVAL_TRIGGER_SECRET=$AGENT_EVAL_TRIGGER_SECRET");
+  await expect(page.locator(".integration-snippet")).toContainText("AGENT_EVAL_TRIGGER_SECRET=<创建 Trigger 后保存的一次性密钥>");
   await page.getByRole("button", { name: "刷新", exact: true }).last().click();
   await expect(page.getByText("created-once-test-value", { exact: true })).toHaveCount(0);
   await expect(page.getByText(trigger.secret_mask, { exact: true })).toBeVisible();

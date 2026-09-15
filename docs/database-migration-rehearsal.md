@@ -34,7 +34,7 @@ python scripts/rehearse_migration.py --workdir .\migration-rehearsal
 ```powershell
 New-Item -ItemType Directory -Force .\backups | Out-Null
 $backup = ".\backups\agent-eval-$(Get-Date -Format yyyyMMdd-HHmmss).dump"
-docker compose -f infra/docker-compose.yml exec -T postgres pg_dump -U agent_eval -Fc agent_eval > $backup
+docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres pg_dump -U agent_eval -Fc agent_eval > $backup
 Get-FileHash $backup -Algorithm SHA256
 ```
 
@@ -46,9 +46,9 @@ Get-FileHash $backup -Algorithm SHA256
 
 ```powershell
 $backup = Resolve-Path .\backups\agent-eval-YYYYMMDD-HHMMSS.dump
-docker compose -f infra/docker-compose.yml cp $backup postgres:/tmp/agent-eval-restore.dump
-docker compose -f infra/docker-compose.yml exec -T postgres pg_restore --clean --if-exists --no-owner -U agent_eval -d agent_eval /tmp/agent-eval-restore.dump
-docker compose -f infra/docker-compose.yml exec -T postgres psql -U agent_eval -d agent_eval -c "SELECT id, name FROM projects;"
+docker compose --env-file .env -f infra/docker-compose.yml cp $backup postgres:/tmp/agent-eval-restore.dump
+docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres pg_restore --clean --if-exists --no-owner -U agent_eval -d agent_eval /tmp/agent-eval-restore.dump
+docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres psql -U agent_eval -d agent_eval -c "SELECT id, name FROM projects;"
 ```
 
 然后启动 API，并验证 `default-project` 的受认证 Trace 仍可写入和读取。已有 `project-1` 的开发会话令牌在本地迁移后可作为兼容令牌使用一次；将环境变量更新为 `dev:default-project:<workspace-session-secret>` 后即可使用新的令牌格式。

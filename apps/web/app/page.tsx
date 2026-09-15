@@ -7,7 +7,6 @@ import {
   Package,
   ClipboardCheck,
   Check,
-  ChevronDown,
   CircleAlert,
   CircleCheck,
   CircleDashed,
@@ -28,6 +27,7 @@ import { EvaluatorsView } from "./evaluators-view";
 import { ReportsView } from "./reports-view";
 import { RunsView } from "./runs-view";
 import { TracesView } from "./traces-view";
+import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
 
 type ViewKey =
   | "overview"
@@ -91,10 +91,6 @@ function normalizeRunPage(value: unknown): ExperimentPage {
   return { items: asArray<Run>(page.items), total: asNumber(page.total) };
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "default-project";
-const SESSION = process.env.NEXT_PUBLIC_WORKSPACE_SESSION ?? "";
-
 const navItems: Array<{ key: ViewKey; label: string; icon: IconComponent }> = [
   { key: "overview", label: "总览", icon: Gauge },
   { key: "traces", label: "Trace", icon: Workflow },
@@ -112,7 +108,7 @@ const viewLabels: Record<ViewKey, string> = Object.fromEntries(
 ) as Record<ViewKey, string>;
 
 async function requestJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetchApi(`${API_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
       "X-Workspace-Session": SESSION,
@@ -229,13 +225,9 @@ function Overview({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
     <section className="overview-workbench">
       <section className="welcome-band">
         <div>
-          <p className="eyebrow"><Workflow size={14} /> 真实 Agent 评测工作台</p>
-          <h1>用同一套数据集，<br /><span>验证每次 Agent 发布。</span></h1>
-          <p className="lede">Python SDK 在你的进程中运行真实 Tool、RAG 或自定义 Agent；平台保存 Trace、评分、版本对比和发布结论。</p>
-        </div>
-        <div className="welcome-mark" aria-hidden="true">
-          <Workflow size={48} strokeWidth={1.2} />
-          <span>Trace → Quality</span>
+          <p className="eyebrow"><Workflow size={14} /> 当前项目 · {PROJECT_ID}</p>
+          <h1>评测总览</h1>
+          <p className="lede">查看真实 Agent 上报的 Trace、Experiment、评分和发布结论。</p>
         </div>
       </section>
 
@@ -267,7 +259,13 @@ function Overview({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
                 <div className="panel-heading"><div><p className="eyebrow">最近质量工作</p><h2>最近的 Experiment</h2></div><button className="text-button" onClick={() => onNavigate("runs")}>查看全部 <ArrowUpRight size={15} /></button></div>
                 <div className="run-list">
                   {recentRuns.length === 0 && <EmptyLine text="还没有 Experiment，先创建数据集并登记 Agent Release。" />}
-                  {recentRuns.map((run) => <div className="run-row" key={run.id}><div className="run-icon"><Play size={16} /></div><div className="run-main"><strong>{run.id}</strong><span>{run.completed_cases + run.failed_cases} / {run.total_cases} 个用例 · {formatDate(run.created_at)}</span></div><div className="run-score"><strong>{run.total_cases ? `${Math.round(((run.total_cases - run.failed_cases) / run.total_cases) * 100)}%` : "-"}</strong><span>完成率</span></div><StatusMark status={run.status} /></div>)}
+                  {recentRuns.map((run) => {
+                    const terminalCases = Math.min(run.total_cases, run.completed_cases + run.failed_cases);
+                    const successRate = terminalCases > 0
+                      ? `${Math.round((run.completed_cases / terminalCases) * 100)}%`
+                      : "-";
+                    return <div className="run-row" key={run.id}><div className="run-icon"><Play size={16} /></div><div className="run-main"><strong>{run.id}</strong><span>{terminalCases} / {run.total_cases} 个用例已终态 · {formatDate(run.created_at)}</span></div><div className="run-score"><strong>{successRate}</strong><span>已执行成功率</span></div><StatusMark status={run.status} /></div>;
+                  })}
                 </div>
               </article>
               <article className="panel signal-panel">
@@ -294,13 +292,37 @@ function EmptyLine({ text }: { text: string }) {
   return <div className="overview-line-empty"><Check size={15} />{text}</div>;
 }
 
+function ApiStatus() {
+  const [status, setStatus] = useState<"checking" | "connected" | "unavailable">("checking");
+
+  useEffect(() => {
+    let active = true;
+    const check = async () => {
+      try {
+        const response = await fetch(`${API_URL}/health`, { cache: "no-store" });
+        const body = await response.json().catch(() => null) as { status?: unknown } | null;
+        if (active) setStatus(response.ok && body?.status === "ok" ? "connected" : "unavailable");
+      } catch {
+        if (active) setStatus("unavailable");
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const text = status === "checking" ? "API 检查中" : status === "connected" ? "API 已连接" : "API 不可用";
+  return <div className={`system-status ${status}`} role="status"><span className="status-dot" />{text}<span>v0.1.0</span></div>;
+}
+
 export default function Home() {
   const [activeView, setActiveView] = useState<ViewKey>("overview");
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("");
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const [selectedTraceId, setSelectedTraceId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
 
@@ -347,10 +369,9 @@ export default function Home() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">AE</div><div><strong>Agent Eval</strong><span>质量评测工作台</span></div></div>
-        <button className="workspace-switcher" aria-label="切换工作区" onClick={() => setWorkspaceOpen((open) => !open)} aria-expanded={workspaceOpen}><span>工作区</span><strong>本地项目</strong><ChevronDown size={15} /></button>
-        {workspaceOpen && <div className="workspace-menu"><strong>本地项目</strong><span>当前连接 default-project</span></div>}
+        <div className="workspace-current" aria-label="当前项目"><span>当前项目</span><strong>{PROJECT_ID}</strong></div>
         <nav aria-label="主导航">{navItems.map(({ key, label, icon: Icon }) => <button className={activeView === key ? "nav-item active" : "nav-item"} key={key} aria-label={label} onClick={() => navigate(key)}><Icon size={18} /><span>{label}</span>{key === "runs" && <i className="nav-count">{activeView === "runs" ? "·" : ""}</i>}</button>)}</nav>
-        <div className="sidebar-bottom"><div className="system-status"><span className="pulse" /> API 已连接<span>v0.1.0</span></div><div className="profile"><div className="avatar">D</div><div><strong>开发者</strong><span>单人工作区</span></div><button className="more-dots-button" aria-label="打开个人菜单" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)}><MoreDots /></button>{profileOpen && <div className="profile-menu"><strong>开发者</strong><span>本地单人工作区</span></div>}</div></div>
+        <div className="sidebar-bottom"><ApiStatus /><div className="profile" aria-label="当前运行模式"><div className="avatar">AE</div><div><strong>单项目模式</strong><span>本地工作台</span></div></div></div>
       </aside>
       <main className="main-content">
         <header className="topbar"><div className="breadcrumb"><span>质量评测工作台</span><b>/</b><strong>{activeLabel}</strong></div><div className="topbar-actions">{searchOpen && <label className="topbar-search"><Search size={15} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") submitSearch(); if (event.key === "Escape") { setSearchOpen(false); setQuery(""); } }} placeholder="搜索导航" aria-label="搜索导航" /></label>}<button className="icon-button" title="搜索导航" aria-label="搜索导航" onClick={() => setSearchOpen((open) => !open)}><Search size={18} /></button><button className="outline-button" onClick={() => navigate("traces")}><Activity size={16} />实时 Trace</button><button className="primary" onClick={() => navigate("runs")}><Play size={16} />新建评测</button></div>{notice && <div className="global-search-notice" role="status">{notice}</div>}</header>
@@ -358,8 +379,4 @@ export default function Home() {
       </main>
     </div>
   );
-}
-
-function MoreDots() {
-  return <span className="more-dots" aria-hidden="true"><i /><i /><i /></span>;
 }
