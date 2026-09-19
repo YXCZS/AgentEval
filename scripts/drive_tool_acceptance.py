@@ -19,10 +19,9 @@ load_dotenv(ROOT / ".env", override=False)
 # Platform (self-hosted API) config.
 os.environ.setdefault("AGENT_EVAL_BASE_URL", "http://localhost:18080")
 os.environ.setdefault("AGENT_EVAL_PROJECT_ID", "default-project")
-os.environ.setdefault(
-    "AGENT_EVAL_API_KEY",
-    "aek_default-project_zHQJZzQMMTZxDA17YJhX9hYfDgXfDi4DS9aGjUSsGxI",
-)
+# AGENT_EVAL_API_KEY is intentionally NOT hardcoded here. It must be set in the
+# local .env (which is gitignored) or exported in the shell. The project key is
+# a secret and is provisioned through the browser "连接/API Keys" UI.
 
 # Provider (real DeepSeek) config already in .env:
 #   LIVE_ACCEPTANCE_BASE_URL / LIVE_ACCEPTANCE_API_KEY / LIVE_ACCEPTANCE_CHAT_MODEL
