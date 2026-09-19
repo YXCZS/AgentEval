@@ -1,7 +1,9 @@
 FROM node:22-alpine AS dependencies
 WORKDIR /app
+# 国内构建可通过 build arg 切换 npm 镜像源（compose 由 .env.production 注入）。
+ARG NPM_REGISTRY=https://registry.npmjs.org
 COPY apps/web/package.json apps/web/package-lock.json ./
-RUN npm ci
+RUN npm ci --registry="$NPM_REGISTRY"
 
 FROM node:22-alpine AS runner
 WORKDIR /app
