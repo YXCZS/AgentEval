@@ -57,11 +57,12 @@ test("BLOCK 门禁可以打开失败 Case 的首错诊断", async ({ page }) => 
 
   await page.goto("/");
   await page.getByRole("button", { name: "回归分析", exact: true }).click();
-  await page.getByRole("tab", { name: "比较与门禁" }).click();
+  await page.getByRole("tab", { name: "回归比较" }).click();
   await page.getByRole("checkbox").nth(0).check();
   await page.getByRole("checkbox").nth(1).check();
   await page.getByRole("button", { name: "比较运行", exact: true }).click();
   await expect(page.getByText("新增失败", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "发布门禁", exact: true }).click();
   await page.getByText("使用 YAML 门禁策略", { exact: true }).click();
   await page.getByPlaceholder("粘贴当前项目实际使用的 YAML 门禁策略").fill("version: test-v1\nrules:\n  - metric: task_success\n    aggregation: pass_rate\n    operator: gte\n    threshold: 0.9\n    severity: block");
   await page.getByRole("button", { name: "评估门禁", exact: true }).click();
@@ -70,7 +71,7 @@ test("BLOCK 门禁可以打开失败 Case 的首错诊断", async ({ page }) => 
   await expect(page.getByText("候选版本第一次偏离发生在工具参数校验。", { exact: true })).toBeVisible();
 });
 
-test("比较与门禁忠实展示改善、持平、退化和证据不足状态", async ({ page }) => {
+test("回归比较忠实展示改善、持平、退化和证据不足状态", async ({ page }) => {
   const candidatePoint = (passRate: number, delta: number) => ({
     run_id: candidateRun.run_id,
     average: passRate,
@@ -156,7 +157,7 @@ test("比较与门禁忠实展示改善、持平、退化和证据不足状态",
 
   await page.goto("/");
   await page.getByRole("button", { name: "回归分析", exact: true }).click();
-  await page.getByRole("tab", { name: "比较与门禁" }).click();
+  await page.getByRole("tab", { name: "回归比较" }).click();
   await page.getByRole("checkbox").nth(0).check();
   await page.getByRole("checkbox").nth(1).check();
   await page.getByRole("button", { name: "比较运行", exact: true }).click();
@@ -169,6 +170,7 @@ test("比较与门禁忠实展示改善、持平、退化和证据不足状态",
   await expect(page.getByText("首错诊断：无法确定", { exact: true })).toBeVisible();
   await expect(page.getByText("缺少可对齐的候选工具 Span，无法可靠定位首错。", { exact: true })).toBeVisible();
 
+  await page.getByRole("button", { name: "发布门禁", exact: true }).click();
   await page.getByText("使用 YAML 门禁策略", { exact: true }).click();
   await page.getByPlaceholder("粘贴当前项目实际使用的 YAML 门禁策略").fill("version: evidence-v1\nrules:\n  - metric: quality_regressed\n    aggregation: pass_rate\n    operator: gte\n    threshold: 0.9\n    severity: block");
   await page.getByRole("button", { name: "评估门禁", exact: true }).click();

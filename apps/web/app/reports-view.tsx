@@ -385,6 +385,9 @@ type ReportMode = "report" | "compare" | "gate";
 
 export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMode }) {
   const [mode, setMode] = useState<ReportMode>(initialMode);
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
   const [summaries, setSummaries] = useState<ReportSummary[]>([]);
   const [runId, setRunId] = useState("");
   const [report, setReport] = useState<Report | null>(null);
@@ -692,7 +695,13 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
             <BarChart3 size={14} /> 质量信号
           </p>
           <h1>评测报告</h1>
-          <p>检查指标状态、定位失败，并将每项评分追溯到生成它的执行过程。</p>
+          {mode === "gate" ? (
+            <p>为候选运行配置质量门禁，输出机器可读的放行或阻断结论。</p>
+          ) : mode === "compare" ? (
+            <p>选择基线与候选版本，定位回归与恢复的用例，并导出比较结论。</p>
+          ) : (
+            <p>检查指标状态、定位失败，并将每项评分追溯到生成它的执行过程。</p>
+          )}
         </div>
         <button
           className="outline-button"
@@ -723,7 +732,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
           role="tab"
           aria-selected={mode === "compare"}
         >
-          <GitCompareArrows size={15} /> 比较与门禁
+          <GitCompareArrows size={15} /> 回归比较
         </button>
         <button
           className={mode === "gate" ? "active" : ""}
@@ -736,6 +745,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
       </div>
       {mode === "compare" || mode === "gate" ? (
         <ComparisonGatePanel
+          mode={mode}
           summaries={summaries}
           selectedRunId={runId}
           comparisonIds={comparisonIds}
@@ -750,6 +760,13 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
           gatePolicy={gatePolicy}
           busy={compareBusy}
           onToggle={toggleComparison}
+          onSelectRun={(value) => {
+            setRunId(value);
+            setMetric("");
+            setExecutionStatus("");
+            setGateResult(null);
+            setGateMetric("");
+          }}
           onCompare={() => void createComparison()}
           onMetric={setGateMetric}
           onMinimum={setGateMinimum}
@@ -978,6 +995,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
 }
 
 function ComparisonGatePanel({
+  mode,
   summaries,
   selectedRunId,
   comparisonIds,
@@ -992,6 +1010,7 @@ function ComparisonGatePanel({
   gatePolicy,
   busy,
   onToggle,
+  onSelectRun,
   onCompare,
   onMetric,
   onMinimum,
@@ -1004,6 +1023,7 @@ function ComparisonGatePanel({
   onDownload,
   onGate,
 }: {
+  mode: ReportMode;
   summaries: ReportSummary[];
   selectedRunId: string;
   comparisonIds: string[];
@@ -1018,6 +1038,7 @@ function ComparisonGatePanel({
   gatePolicy: string;
   busy: boolean;
   onToggle: (runId: string) => void;
+  onSelectRun: (runId: string) => void;
   onCompare: () => void;
   onMetric: (value: string) => void;
   onMinimum: (value: string) => void;
@@ -1060,6 +1081,8 @@ function ComparisonGatePanel({
   const candidateRunId = comparisonRuns[1]?.run_id ?? selectedRunId;
   return (
     <div className="compare-workbench">
+      {mode === "compare" ? (
+        <>
       <section className="compare-config panel">
         <div className="report-panel-header">
           <div>
@@ -1282,6 +1305,9 @@ function ComparisonGatePanel({
           </div>
         </section>
       )}
+        </>
+      ) : (
+        <>
       <section className="gate-config panel">
         <div className="report-panel-header">
           <div>
@@ -1291,6 +1317,21 @@ function ComparisonGatePanel({
           <ShieldCheck size={17} />
         </div>
         <div className="gate-config-body">
+          <label className="field-label">
+            评测运行
+            <select
+              value={selectedRunId}
+              onChange={(event) => onSelectRun(event.target.value)}
+            >
+              <option value="">选择运行</option>
+              {summaries.map((item) => (
+                <option key={item.run_id} value={item.run_id}>
+                  {item.run_id.slice(0, 12)} / {item.total_cases} 个用例 /{" "}
+                  {label(item.status)}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="field-label">
             指标
             <select
@@ -1391,7 +1432,11 @@ function ComparisonGatePanel({
                         <button
                           className="gate-failed-case"
                           key={caseId}
-                          onClick={() => onSelectCase(caseId)}
+                          onClick={() =>
+                            comparison
+                              ? onSelectCase(caseId)
+                              : onOpenCase(gateResult.run_id, caseId)
+                          }
                           type="button"
                         >
                           {caseId} <ExternalLink size={11} />
@@ -1405,6 +1450,16 @@ function ComparisonGatePanel({
           )}
         </div>
       </section>
+      {comparison && selectedComparisonCase && (
+        <ComparisonCaseDetail
+          item={selectedComparisonCase}
+          baselineRunId={comparison.baseline_run_id}
+          candidateRunId={candidateRunId}
+          onOpenCase={onOpenCase}
+        />
+      )}
+        </>
+      )}
     </div>
   );
 }
