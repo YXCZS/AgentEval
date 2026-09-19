@@ -7,7 +7,8 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
         NEXT_PUBLIC_PROJECT_ID: ${NEXT_PUBLIC_PROJECT_ID:-default-project}
-        NEXT_PUBLIC_WORKSPACE_SESSION: ${NEXT_PUBLIC_WORKSPACE_SESSION:-dev:default-project:local-compose-session-secret}
+        NEXT_PUBLIC_WORKSPACE_SESSION: ${NEXT_PUBLIC_WORKSPACE_SESSION:-}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     ports:
       - "${AGENT_EVAL_WEB_PORT:-3000}:3000"
     depends_on:
@@ -57,6 +58,8 @@ services:
     build:
       context: ..
       dockerfile: apps/worker/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://agent_eval:agent_eval@postgres:5432/agent_eval}
