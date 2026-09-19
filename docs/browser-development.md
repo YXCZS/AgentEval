@@ -9,7 +9,7 @@
 3. 用 `browser_click`、`browser_fill_form` 或 `browser_select_option` 操作快照中的目标。
 4. 操作后重新获取快照，确认页面状态或成功提示发生变化。
 5. 用 `browser_network_requests` 检查真实 API 请求，用 `browser_console_messages` 检查前端错误。
-6. 修改完成后，在桌面和移动端分别重复关键流程。
+6. 修改完成后，在桌面工作台重复关键流程。
 
 截图只用于视觉检查，不能作为点击目标。页面结构变化后，不要复用旧的 `ref`。
 

@@ -51,8 +51,7 @@
 
 <table>
   <tr>
-    <td align="center"><strong>中文 Trace-first 工作台</strong><br><img src="frontend-workbench-desktop.png" width="360" alt="工作台总览"></td>
-    <td align="center"><strong>移动端工作台</strong><br><img src="agent-eval-workbench-mobile.png" width="180" alt="移动端工作台"></td>
+    <td align="center"><strong>中文 Trace-first 工作台</strong><br><img src="frontend-workbench-desktop.png" width="480" alt="工作台总览"></td>
   </tr>
 </table>
 

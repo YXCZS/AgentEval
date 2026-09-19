@@ -44,7 +44,7 @@ test("fresh project shows truthful SDK onboarding without creating data", async 
   expect(requests.every((request) => request.method === "GET")).toBe(true);
 });
 
-test("all workbench navigation and shell commands are interactive", async ({ page }, testInfo) => {
+test("all workbench navigation and shell commands are interactive", async ({ page }) => {
   await page.route("**/projects/default-project/**", async (route) => {
     const request = route.request();
     if (request.method() === "GET") {
@@ -64,13 +64,8 @@ test("all workbench navigation and shell commands are interactive", async ({ pag
   await page.goto("/");
   await expect(page.locator(".page-content")).toBeVisible();
 
-  if (testInfo.project.name === "desktop-chromium") {
-    await expect(page.getByLabel("当前项目")).toContainText("default-project");
-    await expect(page.getByLabel("当前运行模式")).toContainText("单项目模式");
-  } else {
-    await expect(page.getByLabel("当前项目")).toBeHidden();
-    await expect(page.getByLabel("当前运行模式")).toBeHidden();
-  }
+  await expect(page.getByLabel("当前项目")).toContainText("default-project");
+  await expect(page.getByLabel("当前运行模式")).toContainText("单项目模式");
 
   for (const label of navigation) {
     await page.locator(".sidebar nav").getByRole("button", { name: label, exact: true }).click();
@@ -88,13 +83,4 @@ test("all workbench navigation and shell commands are interactive", async ({ pag
 
   await page.getByRole("button", { name: "新建评测", exact: true }).click();
   await expect(page.locator(".breadcrumb strong")).toHaveText("实验");
-
-  if (testInfo.project.name === "mobile-chromium") {
-    const dimensions = await page.evaluate(() => ({
-      bodyWidth: document.body.scrollWidth,
-      viewportWidth: window.innerWidth,
-    }));
-    expect(dimensions.bodyWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
-    await expect(page.locator(".sidebar nav")).toHaveCSS("overflow-x", "auto");
-  }
 });
