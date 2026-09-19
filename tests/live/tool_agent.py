@@ -22,9 +22,20 @@ from .provider_preflight import LiveProviderConfig, _endpoint_origin, _safe_erro
 
 ORDER_ID_PATTERN = re.compile(r"^ORDER-[0-9]{4}$")
 ORDERS: dict[str, dict[str, Any]] = {
+    # Processing orders: cancellable, not yet delivered.
     "ORDER-1001": {"status": "processing", "paid": True, "delivered_days_ago": None},
+    "ORDER-1004": {"status": "processing", "paid": True, "delivered_days_ago": None},
+    "ORDER-1007": {"status": "processing", "paid": False, "delivered_days_ago": None},
+    # Shipped orders: neither cancellable nor refundable.
     "ORDER-1002": {"status": "shipped", "paid": True, "delivered_days_ago": None},
+    "ORDER-1005": {"status": "shipped", "paid": True, "delivered_days_ago": None},
+    "ORDER-1008": {"status": "shipped", "paid": False, "delivered_days_ago": None},
+    # Delivered orders: refundable only within the 30-day window.
     "ORDER-1003": {"status": "delivered", "paid": True, "delivered_days_ago": 5},
+    "ORDER-1006": {"status": "delivered", "paid": True, "delivered_days_ago": 12},
+    "ORDER-1009": {"status": "delivered", "paid": True, "delivered_days_ago": 29},
+    "ORDER-1010": {"status": "delivered", "paid": True, "delivered_days_ago": 31},
+    "ORDER-1011": {"status": "delivered", "paid": True, "delivered_days_ago": 90},
 }
 
 SYSTEM_PROMPT = """You are a read-only order support agent used for release evaluation.

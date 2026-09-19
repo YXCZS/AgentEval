@@ -17,7 +17,7 @@ from tests.live.rag_dataset import (
 
 def test_rag_cases_have_explainable_retrieval_evidence() -> None:
     validate_rag_cases()
-    assert len(RAG_CASES) == 2
+    assert len(RAG_CASES) == 6
     assert len({case["id"] for case in RAG_CASES}) == len(RAG_CASES)
     assert all(case["retrieval_context"] for case in RAG_CASES)
     assert all(case["criteria"] for case in RAG_CASES)

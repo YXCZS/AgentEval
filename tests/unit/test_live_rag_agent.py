@@ -74,15 +74,6 @@ class FakeOpenAI:
 
 
 def install_client(monkeypatch: pytest.MonkeyPatch) -> FakeOpenAI:
-    embedding = SimpleNamespace(
-        data=[
-            SimpleNamespace(index=0, embedding=[1.0, 0.0]),
-            SimpleNamespace(index=1, embedding=[0.95, 0.05]),
-            SimpleNamespace(index=2, embedding=[0.0, 1.0]),
-            SimpleNamespace(index=3, embedding=[0.1, 0.9]),
-        ],
-        usage=SimpleNamespace(prompt_tokens=11),
-    )
     chat = SimpleNamespace(
         id="chatcmpl-rag-real",
         model="provider-chat-release",
@@ -98,7 +89,26 @@ def install_client(monkeypatch: pytest.MonkeyPatch) -> FakeOpenAI:
             )
         ],
     )
-    client = FakeOpenAI(embedding, chat)
+    client = FakeOpenAI(None, chat)
+
+    def dynamic_embedding(**kwargs: Any) -> object:
+        client.embeddings.requests.append(kwargs)
+        inputs = kwargs.get("input")
+        count = len(inputs) if isinstance(inputs, list) else 1
+        # index 0 is the query, the rest are reference documents. Give the query
+        # and the first document (policy-refund-window) nearly identical vectors
+        # so cosine ranking selects it first; other documents are orthogonal.
+        data = []
+        for index in range(count):
+            if index == 0:
+                data.append(SimpleNamespace(index=index, embedding=[1.0, 0.0]))
+            elif index == 1:
+                data.append(SimpleNamespace(index=index, embedding=[0.95, 0.05]))
+            else:
+                data.append(SimpleNamespace(index=index, embedding=[0.0, 1.0]))
+        return SimpleNamespace(data=data, usage=SimpleNamespace(prompt_tokens=11))
+
+    client.embeddings.create = dynamic_embedding  # type: ignore[method-assign]
     monkeypatch.setattr(rag_agent, "OpenAI", lambda **_: client)
     return client
 
@@ -121,7 +131,7 @@ def test_real_rag_task_uses_embedding_cosine_retrieval_and_chat_evidence(
     llm = next(span for span in payload["spans"] if span["kind"] == "llm")
 
     assert client.embeddings.requests[0]["model"] == "configured-embedding-model"
-    assert len(client.embeddings.requests[0]["input"]) == 4
+    assert len(client.embeddings.requests[0]["input"]) == len(rag_agent.RAG_DOCUMENTS) + 1
     assert client.completions.requests[0]["response_format"] == {"type": "json_object"}
     assert result.output["citations"] == ["policy-refund-window"]
     assert result.output["retrieved_document_ids"][0] == "policy-refund-window"

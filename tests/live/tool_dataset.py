@@ -16,6 +16,7 @@ DATASET_DESCRIPTION = (
 DATASET_SCHEMA_VERSION = "1.1.0"
 
 TOOL_CASES: list[dict[str, Any]] = [
+    # ---- Status lookups -------------------------------------------------
     {
         "id": "order-status-processing",
         "input": {
@@ -35,6 +36,176 @@ TOOL_CASES: list[dict[str, Any]] = [
             "Report the state returned by the tool without changing the order.",
         ],
         "metadata": {"business_rule": "status_lookup", "tool_required": True},
+    },
+    {
+        "id": "order-status-shipped",
+        "input": {
+            "order_id": "ORDER-1002",
+            "request": "Where is my order right now?",
+        },
+        "expected_tools": [
+            {
+                "name": "lookup_order_status",
+                "arguments": {"order_id": "ORDER-1002"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "shipped"},
+        "criteria": [
+            "Use the read-only order status tool for a status request.",
+            "Report the state returned by the tool without changing the order.",
+        ],
+        "metadata": {"business_rule": "status_lookup", "tool_required": True},
+    },
+    {
+        "id": "order-status-delivered",
+        "input": {
+            "order_id": "ORDER-1003",
+            "request": "Has my order been delivered?",
+        },
+        "expected_tools": [
+            {
+                "name": "lookup_order_status",
+                "arguments": {"order_id": "ORDER-1003"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "delivered"},
+        "criteria": [
+            "Use the read-only order status tool for a status request.",
+            "Report the state returned by the tool without changing the order.",
+        ],
+        "metadata": {"business_rule": "status_lookup", "tool_required": True},
+    },
+    {
+        "id": "order-status-unpaid-processing",
+        "input": {
+            "order_id": "ORDER-1007",
+            "request": "Can you tell me the status of this order?",
+        },
+        "expected_tools": [
+            {
+                "name": "lookup_order_status",
+                "arguments": {"order_id": "ORDER-1007"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "processing"},
+        "criteria": [
+            "Use the read-only order status tool for a status request.",
+            "Report the state returned by the tool without changing the order.",
+        ],
+        "metadata": {"business_rule": "status_lookup", "tool_required": True},
+    },
+    {
+        "id": "status-unknown-order",
+        "input": {
+            "order_id": "ORDER-9999",
+            "request": "What is the current status of this order?",
+        },
+        "expected_tools": [
+            {
+                "name": "lookup_order_status",
+                "arguments": {"order_id": "ORDER-9999"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "not_found", "found": False},
+        "criteria": [
+            "Use the read-only status tool even when the order may not exist.",
+            "Report that the order was not found without inventing a status.",
+        ],
+        "metadata": {"business_rule": "unknown_order", "tool_required": True},
+    },
+    {
+        "id": "status-unknown-order-cancel",
+        "input": {
+            "order_id": "ORDER-8888",
+            "request": "Can I cancel this order?",
+        },
+        "expected_tools": [
+            {
+                "name": "check_cancellation_eligibility",
+                "arguments": {"order_id": "ORDER-8888"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "not_found", "found": False, "eligible": False},
+        "criteria": [
+            "Use the cancellation-eligibility tool even when the order may not exist.",
+            "Report that the order was not found without claiming a cancellation.",
+        ],
+        "metadata": {"business_rule": "unknown_order_cancel", "tool_required": True},
+    },
+    # ---- Cancellation eligibility --------------------------------------
+    {
+        "id": "cancel-processing-order",
+        "input": {
+            "order_id": "ORDER-1001",
+            "request": "Please cancel this order before it is shipped.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_cancellation_eligibility",
+                "arguments": {"order_id": "ORDER-1001"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "processing", "eligible": True},
+        "criteria": [
+            "Check cancellation eligibility before claiming that an order can be cancelled.",
+            "A processing order is eligible under the controlled business rules.",
+        ],
+        "metadata": {
+            "business_rule": "cancellation_eligibility",
+            "tool_required": True,
+        },
+    },
+    {
+        "id": "cancel-processing-order-1004",
+        "input": {
+            "order_id": "ORDER-1004",
+            "request": "I changed my mind, cancel this order.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_cancellation_eligibility",
+                "arguments": {"order_id": "ORDER-1004"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "processing", "eligible": True},
+        "criteria": [
+            "Check cancellation eligibility before claiming that an order can be cancelled.",
+            "A processing order is eligible under the controlled business rules.",
+        ],
+        "metadata": {
+            "business_rule": "cancellation_eligibility",
+            "tool_required": True,
+        },
+    },
+    {
+        "id": "cancel-unpaid-processing-order",
+        "input": {
+            "order_id": "ORDER-1007",
+            "request": "I haven't paid yet, cancel it.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_cancellation_eligibility",
+                "arguments": {"order_id": "ORDER-1007"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "processing", "eligible": True},
+        "criteria": [
+            "Check cancellation eligibility before claiming that an order can be cancelled.",
+            "A processing order is eligible regardless of payment state under the rules.",
+        ],
+        "metadata": {
+            "business_rule": "cancellation_eligibility",
+            "tool_required": True,
+        },
     },
     {
         "id": "cancel-shipped-order",
@@ -60,6 +231,53 @@ TOOL_CASES: list[dict[str, Any]] = [
         },
     },
     {
+        "id": "cancel-shipped-order-1005",
+        "input": {
+            "order_id": "ORDER-1005",
+            "request": "Stop the shipment and cancel this order.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_cancellation_eligibility",
+                "arguments": {"order_id": "ORDER-1005"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "shipped", "eligible": False},
+        "criteria": [
+            "Check cancellation eligibility instead of changing the order.",
+            "A shipped order is not cancellable under the controlled business rules.",
+        ],
+        "metadata": {
+            "business_rule": "cancellation_eligibility",
+            "tool_required": True,
+        },
+    },
+    {
+        "id": "cancel-delivered-order",
+        "input": {
+            "order_id": "ORDER-1003",
+            "request": "Cancel this order even though it already arrived.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_cancellation_eligibility",
+                "arguments": {"order_id": "ORDER-1003"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "delivered", "eligible": False},
+        "criteria": [
+            "Check cancellation eligibility instead of changing the order.",
+            "A delivered order is not cancellable under the controlled business rules.",
+        ],
+        "metadata": {
+            "business_rule": "cancellation_eligibility",
+            "tool_required": True,
+        },
+    },
+    # ---- Refund eligibility ---------------------------------------------
+    {
         "id": "refund-recent-delivery",
         "input": {
             "order_id": "ORDER-1003",
@@ -84,38 +302,160 @@ TOOL_CASES: list[dict[str, Any]] = [
         "metadata": {"business_rule": "refund_eligibility", "tool_required": True},
     },
     {
-        "id": "cancel-processing-order",
+        "id": "refund-12-days",
         "input": {
-            "order_id": "ORDER-1001",
-            "request": "Please cancel this order before it is shipped.",
+            "order_id": "ORDER-1006",
+            "request": "Can I get a refund on this delivered order?",
         },
         "expected_tools": [
             {
-                "name": "check_cancellation_eligibility",
-                "arguments": {"order_id": "ORDER-1001"},
+                "name": "check_refund_eligibility",
+                "arguments": {"order_id": "ORDER-1006"},
                 "order": 0,
             }
         ],
-        "expected_state": {"status": "processing", "eligible": True},
-        "criteria": [
-            "Check cancellation eligibility before claiming that an order can be cancelled.",
-            "A processing order is eligible under the controlled business rules.",
-        ],
-        "metadata": {
-            "business_rule": "cancellation_eligibility",
-            "tool_required": True,
+        "expected_state": {
+            "status": "delivered",
+            "eligible": True,
+            "days_since_delivery": 12,
         },
+        "criteria": [
+            "Check refund eligibility instead of issuing a refund.",
+            "A delivery from 12 days ago is inside the controlled 30-day refund window.",
+        ],
+        "metadata": {"business_rule": "refund_eligibility", "tool_required": True},
     },
     {
-        "id": "status-unknown-order",
+        "id": "refund-29-days-boundary",
         "input": {
-            "order_id": "ORDER-9999",
-            "request": "What is the current status of this order?",
+            "order_id": "ORDER-1009",
+            "request": "I want a refund, it was delivered 29 days ago.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_refund_eligibility",
+                "arguments": {"order_id": "ORDER-1009"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {
+            "status": "delivered",
+            "eligible": True,
+            "days_since_delivery": 29,
+        },
+        "criteria": [
+            "Check refund eligibility instead of issuing a refund.",
+            "A delivery from 29 days ago is still inside the 30-day window (boundary).",
+        ],
+        "metadata": {"business_rule": "refund_eligibility_boundary", "tool_required": True},
+    },
+    {
+        "id": "refund-31-days-outside-window",
+        "input": {
+            "order_id": "ORDER-1010",
+            "request": "I want a refund, it was delivered 31 days ago.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_refund_eligibility",
+                "arguments": {"order_id": "ORDER-1010"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {
+            "status": "delivered",
+            "eligible": False,
+            "days_since_delivery": 31,
+        },
+        "criteria": [
+            "Check refund eligibility instead of issuing a refund.",
+            "A delivery from 31 days ago is outside the 30-day window (boundary).",
+        ],
+        "metadata": {"business_rule": "refund_eligibility_boundary", "tool_required": True},
+    },
+    {
+        "id": "refund-90-days-far-out",
+        "input": {
+            "order_id": "ORDER-1011",
+            "request": "This was delivered three months ago, refund it.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_refund_eligibility",
+                "arguments": {"order_id": "ORDER-1011"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {
+            "status": "delivered",
+            "eligible": False,
+            "days_since_delivery": 90,
+        },
+        "criteria": [
+            "Check refund eligibility instead of issuing a refund.",
+            "A delivery from 90 days ago is far outside the 30-day window.",
+        ],
+        "metadata": {"business_rule": "refund_eligibility", "tool_required": True},
+    },
+    {
+        "id": "refund-shipped-not-delivered",
+        "input": {
+            "order_id": "ORDER-1002",
+            "request": "I want my money back for this order.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_refund_eligibility",
+                "arguments": {"order_id": "ORDER-1002"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {
+            "status": "shipped",
+            "eligible": False,
+            "days_since_delivery": None,
+        },
+        "criteria": [
+            "Check refund eligibility instead of issuing a refund.",
+            "A shipped (not delivered) order is not refundable under the rules.",
+        ],
+        "metadata": {"business_rule": "refund_eligibility", "tool_required": True},
+    },
+    {
+        "id": "refund-processing-order",
+        "input": {
+            "order_id": "ORDER-1004",
+            "request": "Refund this order that hasn't shipped yet.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_refund_eligibility",
+                "arguments": {"order_id": "ORDER-1004"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {
+            "status": "processing",
+            "eligible": False,
+            "days_since_delivery": None,
+        },
+        "criteria": [
+            "Check refund eligibility instead of issuing a refund.",
+            "A processing order is not refundable (not delivered) under the rules.",
+        ],
+        "metadata": {"business_rule": "refund_eligibility", "tool_required": True},
+    },
+    # ---- Cross-scenario: status query on unknown order ids -----------------
+    {
+        "id": "status-unknown-order-8888",
+        "input": {
+            "order_id": "ORDER-8888",
+            "request": "Where is this order?",
         },
         "expected_tools": [
             {
                 "name": "lookup_order_status",
-                "arguments": {"order_id": "ORDER-9999"},
+                "arguments": {"order_id": "ORDER-8888"},
                 "order": 0,
             }
         ],
@@ -125,6 +465,113 @@ TOOL_CASES: list[dict[str, Any]] = [
             "Report that the order was not found without inventing a status.",
         ],
         "metadata": {"business_rule": "unknown_order", "tool_required": True},
+    },
+    {
+        "id": "status-delivered-1006",
+        "input": {
+            "order_id": "ORDER-1006",
+            "request": "What is the delivery status?",
+        },
+        "expected_tools": [
+            {
+                "name": "lookup_order_status",
+                "arguments": {"order_id": "ORDER-1006"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "delivered"},
+        "criteria": [
+            "Use the read-only order status tool for a status request.",
+            "Report the state returned by the tool without changing the order.",
+        ],
+        "metadata": {"business_rule": "status_lookup", "tool_required": True},
+    },
+    {
+        "id": "status-shipped-1008",
+        "input": {
+            "order_id": "ORDER-1008",
+            "request": "Is this order on its way?",
+        },
+        "expected_tools": [
+            {
+                "name": "lookup_order_status",
+                "arguments": {"order_id": "ORDER-1008"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "shipped"},
+        "criteria": [
+            "Use the read-only order status tool for a status request.",
+            "Report the state returned by the tool without changing the order.",
+        ],
+        "metadata": {"business_rule": "status_lookup", "tool_required": True},
+    },
+    {
+        "id": "status-delivered-1011",
+        "input": {
+            "order_id": "ORDER-1011",
+            "request": "When was this order delivered?",
+        },
+        "expected_tools": [
+            {
+                "name": "lookup_order_status",
+                "arguments": {"order_id": "ORDER-1011"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "delivered"},
+        "criteria": [
+            "Use the read-only order status tool for a status request.",
+            "Report the state returned by the tool without changing the order.",
+        ],
+        "metadata": {"business_rule": "status_lookup", "tool_required": True},
+    },
+    {
+        "id": "cancel-shipped-order-1008",
+        "input": {
+            "order_id": "ORDER-1008",
+            "request": "Cancel this unpaid shipped order.",
+        },
+        "expected_tools": [
+            {
+                "name": "check_cancellation_eligibility",
+                "arguments": {"order_id": "ORDER-1008"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {"status": "shipped", "eligible": False},
+        "criteria": [
+            "Check cancellation eligibility instead of changing the order.",
+            "A shipped order is not cancellable regardless of payment state.",
+        ],
+        "metadata": {
+            "business_rule": "cancellation_eligibility",
+            "tool_required": True,
+        },
+    },
+    {
+        "id": "refund-delivered-1009",
+        "input": {
+            "order_id": "ORDER-1009",
+            "request": "Can I still get a refund on this one?",
+        },
+        "expected_tools": [
+            {
+                "name": "check_refund_eligibility",
+                "arguments": {"order_id": "ORDER-1009"},
+                "order": 0,
+            }
+        ],
+        "expected_state": {
+            "status": "delivered",
+            "eligible": True,
+            "days_since_delivery": 29,
+        },
+        "criteria": [
+            "Check refund eligibility instead of issuing a refund.",
+            "A delivery from 29 days ago is inside the 30-day window (boundary).",
+        ],
+        "metadata": {"business_rule": "refund_eligibility_boundary", "tool_required": True},
     },
 ]
 

@@ -12,10 +12,10 @@
 | 文件 | 作用 |
 | --- | --- |
 | `tests/live/tool_agent.py` | **订单支持 Tool Agent**（真实调用 LLM）。`LiveToolAgent` 类，带 3 个只读工具：`lookup_order_status` / `check_cancellation_eligibility` / `check_refund_eligibility` |
-| `tests/live/tool_dataset.py` | Tool Agent 的 5 个订单测试 case（`TOOL_CASES`）、3 个确定性评测器（`EVALUATOR_DEFINITIONS`）、资源准备函数 |
+| `tests/live/tool_dataset.py` | Tool Agent 的 25 个订单测试 case（`TOOL_CASES`）、3 个确定性评测器（`EVALUATOR_DEFINITIONS`）、资源准备函数 |
 | `tests/live/run_tool_acceptance.py` | **端到端验收编排器**：Dataset → Evaluator → Release → Experiment（baseline/candidate 双跑）→ Trace → Score → Comparison → Gate |
 | `tests/live/provider_preflight.py` | 真实 Provider 连通性预检（随机 challenge 验证，证明不是缓存/假响应） |
-| `tests/live/rag_agent.py` / `rag_dataset.py` / `run_rag_acceptance.py` | RAG Agent 的对应实现与验收 |
+| `tests/live/rag_agent.py` / `rag_dataset.py` / `run_rag_acceptance.py` | RAG Agent 的对应实现与验收（6 个政策文档 + 6 条 case） |
 | `scripts/drive_tool_acceptance.py` | 本地驱动脚本（注入平台+Provider 环境变量后调用验收入口） |
 
 **重要区分**：`tests/fixtures/example_agents.py` **不是**真实 Agent —— 它仅是 HTTP fixture（源码内已注明「不入产品」）。真实 Agent 是 `tests/live/` 下的 `LiveToolAgent`，它通过 OpenAI SDK 真实调用 DeepSeek 模型。
@@ -156,3 +156,27 @@ traces:     10 条真实 trace（baseline 5 + candidate 5）
 
 - 驱动脚本 `scripts/drive_tool_acceptance.py` 中的 project key 仅供本地开发验收使用；线上应通过浏览器「连接/API Keys」界面创建，不要硬编码到仓库。
 - 验收产物 `artifacts/live/*.json` 不含 API key、prompt 原文或原始 provider 响应（脚本已主动脱敏）。
+
+---
+
+## 七、评测集扩充（2026-09-19）
+
+评测集规模已从最初的 5+2 条扩充到 **31 条**，覆盖更完整的业务边界：
+
+| 数据集 | 扩充前 | 扩充后 | 覆盖维度 |
+| --- | --- | --- | --- |
+| Tool Agent（`TOOL_CASES`） | 5 条 | **25 条** | 状态查询、取消资格、退款资格、未知订单、退款窗口边界（29/31/90 天） |
+| RAG Agent（`RAG_CASES`） | 2 条 | **6 条** | 退款窗口、取消、物流追踪、退货地址、账号注销、价格调整 |
+
+**关键扩充点**：
+- **订单库**从 3 个扩到 11 个（`ORDER-1001` ~ `ORDER-1011`），覆盖 processing/shipped/delivered 三态 × 已付/未付 × 不同交付天数。
+- **退款窗口边界**：新增 29 天（临界内）、31 天（临界外）、90 天（远超）三条，验证 `<= 30` 的边界判定。
+- **未知订单**：新增取消/查询两类 not_found 场景，验证 Agent 不编造状态。
+- **RAG 政策文档**从 3 个扩到 6 个，语义互斥（退款/取消/物流/退货/注销/调价），保证真实 embedding 检索稳定命中。
+
+**验证**：扩充后 Tool 验收（50 trace = 25×2）与 RAG 验收（6 trace）均 `accepted: true`，单元测试 20 passed。
+
+> 顺带修复一个真实缺陷：阿里云百炼 embedding 响应 `usage.prompt_tokens` 为 `None`（仅返回 `total_tokens`），
+> 原 `_embedding_usage` 强校验会导致 RAG 预检失败。已在 `rag_agent.py` 与 `provider_preflight.py` 增加
+> `total_tokens` 回退逻辑。
+

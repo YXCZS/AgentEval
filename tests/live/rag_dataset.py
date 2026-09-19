@@ -74,6 +74,122 @@ RAG_CASES: list[dict[str, Any]] = [
         ],
         "metadata": {"retrieval_required": True, "business_rule": "cancel_processing"},
     },
+    {
+        "id": "rag-tracking-availability",
+        "input": {"question": "When is package tracking available for my order?"},
+        "retrieval_context": [
+            {
+                "document_id": "policy-shipping-tracking",
+                "content": "Tracking is available after an order is shipped and is sent by email.",
+            }
+        ],
+        "output_schema": {
+            "type": "object",
+            "required": ["answer", "citations", "retrieved_document_ids"],
+            "additionalProperties": False,
+            "properties": {
+                "answer": {"type": "string", "minLength": 1},
+                "citations": {"type": "array", "items": {"type": "string"}},
+                "retrieved_document_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                },
+            },
+        },
+        "criteria": [
+            "Retrieve the controlled tracking policy document using a real embedding request.",
+            "Return a structured answer that cites only retrieved document IDs.",
+        ],
+        "metadata": {"retrieval_required": True, "business_rule": "shipping_tracking"},
+    },
+    {
+        "id": "rag-return-address",
+        "input": {"question": "Where should I ship a product return?"},
+        "retrieval_context": [
+            {
+                "document_id": "policy-return-address",
+                "content": "Returns must be sent to the warehouse at 12 Fulfillment Way.",
+            }
+        ],
+        "output_schema": {
+            "type": "object",
+            "required": ["answer", "citations", "retrieved_document_ids"],
+            "additionalProperties": False,
+            "properties": {
+                "answer": {"type": "string", "minLength": 1},
+                "citations": {"type": "array", "items": {"type": "string"}},
+                "retrieved_document_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                },
+            },
+        },
+        "criteria": [
+            "Retrieve the controlled return-address policy document using a real embedding request.",
+            "Return a structured answer that cites only retrieved document IDs.",
+        ],
+        "metadata": {"retrieval_required": True, "business_rule": "return_address"},
+    },
+    {
+        "id": "rag-account-deletion",
+        "input": {"question": "When can I delete my account?"},
+        "retrieval_context": [
+            {
+                "document_id": "policy-account-deletion",
+                "content": "An account can be deleted only after all orders are delivered.",
+            }
+        ],
+        "output_schema": {
+            "type": "object",
+            "required": ["answer", "citations", "retrieved_document_ids"],
+            "additionalProperties": False,
+            "properties": {
+                "answer": {"type": "string", "minLength": 1},
+                "citations": {"type": "array", "items": {"type": "string"}},
+                "retrieved_document_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                },
+            },
+        },
+        "criteria": [
+            "Retrieve the controlled account-deletion policy document using a real embedding request.",
+            "Return a structured answer that cites only retrieved document IDs.",
+        ],
+        "metadata": {"retrieval_required": True, "business_rule": "account_deletion"},
+    },
+    {
+        "id": "rag-price-adjustment",
+        "input": {"question": "Am I eligible for a price adjustment?"},
+        "retrieval_context": [
+            {
+                "document_id": "policy-price-adjustment",
+                "content": "A price adjustment is granted only when the item price drops within 7 days.",
+            }
+        ],
+        "output_schema": {
+            "type": "object",
+            "required": ["answer", "citations", "retrieved_document_ids"],
+            "additionalProperties": False,
+            "properties": {
+                "answer": {"type": "string", "minLength": 1},
+                "citations": {"type": "array", "items": {"type": "string"}},
+                "retrieved_document_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                },
+            },
+        },
+        "criteria": [
+            "Retrieve the controlled price-adjustment policy document using a real embedding request.",
+            "Return a structured answer that cites only retrieved document IDs.",
+        ],
+        "metadata": {"retrieval_required": True, "business_rule": "price_adjustment"},
+    },
 ]
 
 EVALUATOR_DEFINITIONS: list[dict[str, Any]] = [

@@ -203,6 +203,18 @@ def _usage_value(usage: Any, name: str) -> int:
     return value
 
 
+def _embedding_usage(usage: Any) -> int:
+    prompt_tokens = getattr(usage, "prompt_tokens", None)
+    total_tokens = getattr(usage, "total_tokens", None)
+    # Some OpenAI-compatible embedding providers (e.g. Alibaba Bailian) return
+    # total_tokens but omit prompt_tokens. Fall back to total_tokens.
+    if isinstance(prompt_tokens, int) and not isinstance(prompt_tokens, bool) and prompt_tokens > 0:
+        return prompt_tokens
+    if isinstance(total_tokens, int) and not isinstance(total_tokens, bool) and total_tokens > 0:
+        return total_tokens
+    raise LiveProviderPreflightError("embedding response is missing valid usage token counts")
+
+
 def run_preflight(config: LiveProviderConfig) -> LiveProviderEvidence:
     """Call the real provider with a random challenge and validate its evidence."""
 
@@ -304,7 +316,7 @@ def run_embedding_preflight(config: LiveEmbeddingConfig) -> LiveEmbeddingEvidenc
         raise LiveProviderPreflightError(
             "embedding response placed credential material in public metadata"
         )
-    input_tokens = _usage_value(getattr(response, "usage", None), "prompt_tokens")
+    input_tokens = _embedding_usage(getattr(response, "usage", None))
     if input_tokens <= 0:
         raise LiveProviderPreflightError("embedding response usage.prompt_tokens must be positive")
     return LiveEmbeddingEvidence(

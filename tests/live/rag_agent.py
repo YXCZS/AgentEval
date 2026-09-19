@@ -48,6 +48,21 @@ RAG_DOCUMENTS: tuple[RagDocument, ...] = (
         title="Tracking availability",
         content="Tracking is available after an order is shipped and is sent by email.",
     ),
+    RagDocument(
+        document_id="policy-return-address",
+        title="Return address",
+        content="Returns must be sent to the warehouse at 12 Fulfillment Way.",
+    ),
+    RagDocument(
+        document_id="policy-account-deletion",
+        title="Account deletion",
+        content="An account can be deleted only after all orders are delivered.",
+    ),
+    RagDocument(
+        document_id="policy-price-adjustment",
+        title="Price adjustment",
+        content="A price adjustment is granted only when the item price drops within 7 days.",
+    ),
 )
 
 
@@ -292,10 +307,16 @@ class LiveRagAgent:
 
     @staticmethod
     def _embedding_usage(usage: Any) -> int:
-        value = getattr(usage, "prompt_tokens", None)
-        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-            raise RagAgentProtocolError("embedding response is missing valid usage.prompt_tokens")
-        return value
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
+        total_tokens = getattr(usage, "total_tokens", None)
+        # Some OpenAI-compatible embedding providers (e.g. Alibaba Bailian) return
+        # total_tokens but omit prompt_tokens. Fall back to total_tokens when the
+        # provider does not break down input tokens.
+        if isinstance(prompt_tokens, int) and not isinstance(prompt_tokens, bool) and prompt_tokens > 0:
+            return prompt_tokens
+        if isinstance(total_tokens, int) and not isinstance(total_tokens, bool) and total_tokens > 0:
+            return total_tokens
+        raise RagAgentProtocolError("embedding response is missing valid usage token counts")
 
     @staticmethod
     def _chat_usage(usage: Any) -> dict[str, int]:
