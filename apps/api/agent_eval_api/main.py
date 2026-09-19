@@ -39,6 +39,11 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description="Trace-driven evaluation for RAG, tool, and custom agents.",
     )
+    extra_origins = [
+        origin.strip()
+        for origin in get_settings().cors_origins.split(",")
+        if origin.strip()
+    ]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -50,6 +55,7 @@ def create_app() -> FastAPI:
             "http://127.0.0.1:3002",
             "http://localhost:13000",
             "http://127.0.0.1:13000",
+            *extra_origins,
         ],
         allow_credentials=False,
         allow_methods=["*"],

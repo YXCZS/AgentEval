@@ -10,7 +10,8 @@ services:
         NEXT_PUBLIC_WORKSPACE_SESSION: ${NEXT_PUBLIC_WORKSPACE_SESSION:-}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     ports:
-      - "${AGENT_EVAL_WEB_PORT:-3000}:3000"
+      # 绑定回环地址：生产由 Nginx 反代对外，避免 Web 端口直接暴露公网。
+      - "127.0.0.1:${AGENT_EVAL_WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
@@ -40,8 +41,10 @@ services:
       AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY:-}
       AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID:-primary}
       AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS: '${AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS:-{}}'
+      AGENT_EVAL_CORS_ORIGINS: ${AGENT_EVAL_CORS_ORIGINS:-}
     ports:
-      - "${AGENT_EVAL_API_PORT:-8000}:8000"
+      # 绑定回环地址：生产由 Nginx 反代对外，避免 API 端口直接暴露公网。
+      - "127.0.0.1:${AGENT_EVAL_API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,6 +76,7 @@ services:
       AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY:-}
       AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID:-primary}
       AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS: '${AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS:-{}}'
+      AGENT_EVAL_CORS_ORIGINS: ${AGENT_EVAL_CORS_ORIGINS:-}
     depends_on:
       redis:
         condition: service_healthy

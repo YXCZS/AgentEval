@@ -52,6 +52,14 @@ class Settings(BaseSettings):
         validation_alias="AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID",
         min_length=1,
     )
+    cors_origins: str = Field(
+        default="",
+        validation_alias="AGENT_EVAL_CORS_ORIGINS",
+        description=(
+            "Comma-separated extra CORS origins (e.g. production frontend URLs) "
+            "appended to the built-in localhost development allowlist."
+        ),
+    )
     external_evaluator_secrets: dict[str, SecretStr] = Field(
         default_factory=dict,
         validation_alias="AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS",
