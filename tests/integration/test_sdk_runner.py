@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 from typing import Any
@@ -799,6 +800,15 @@ def test_live_tool_baseline_candidate_full_platform_workflow(
         timeout_seconds=5,
     )
 
+    # Build a data-driven router from the real TOOL_CASES so the scripted LLM
+    # always selects the tool each case expects, independent of dataset size.
+    expected_tool_by_case: dict[tuple[str, str], str] = {
+        (str(case["input"]["order_id"]), str(case["input"]["request"]).strip()): str(
+            case["expected_tools"][0]["name"]
+        )
+        for case in TOOL_CASES
+    }
+
     class ScriptedCompletions:
         def __init__(self) -> None:
             self.request_count = 0
@@ -829,17 +839,9 @@ def test_live_tool_baseline_candidate_full_platform_workflow(
                     ],
                 )
 
-            if "current status" in user_content:
-                tool_name = "lookup_order_status"
-            elif "cancel" in user_content:
-                tool_name = "check_cancellation_eligibility"
-            else:
-                tool_name = "check_refund_eligibility"
-            order_id = next(
-                order_id
-                for order_id in ("ORDER-1001", "ORDER-1002", "ORDER-1003", "ORDER-9999")
-                if order_id in user_content
-            )
+            order_id = re.search(r"ORDER-\d{4}", user_content).group(0)
+            request_text = user_content.split("\n", 1)[1].split(":", 1)[1].strip()
+            tool_name = expected_tool_by_case[(order_id, request_text)]
             call = SimpleNamespace(
                 id=f"call-scripted-{self.request_count}",
                 type="function",
@@ -937,12 +939,13 @@ def test_live_tool_baseline_candidate_full_platform_workflow(
     assert baseline.experiment.dataset_version_id == resources.dataset_version_id
     assert candidate.experiment.dataset_version_id == resources.dataset_version_id
     assert candidate.experiment.baseline_run_id == baseline.experiment.id
-    assert len(attempts) == 10
+    case_count = len(TOOL_CASES)
+    assert len(attempts) == case_count * 2
     assert all(
         attempt.status == "completed" and attempt.evidence_status == "complete"
         for attempt in attempts
     )
-    assert len(scores) == 30
+    assert len(scores) == case_count * 3 * 2
     failed_scores = [
         {
             "run_id": score.run_id,
@@ -957,8 +960,8 @@ def test_live_tool_baseline_candidate_full_platform_workflow(
         if score.status != "passed" or score.value != 1
     ]
     assert failed_scores == []
-    assert len(traces) == 10
-    assert scripted.request_count == 20
+    assert len(traces) == case_count * 2
+    assert scripted.request_count == case_count * 4
 
     comparison = api.post(
         "/projects/project-1/comparisons",
