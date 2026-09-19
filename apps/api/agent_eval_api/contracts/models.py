@@ -1520,6 +1520,7 @@ class UserResponse(ContractModel):
     project_id: str
     created_at: datetime
     last_login_at: datetime | None = None
+    deleted_at: datetime | None = None
 
 
 class UserListResponse(ContractModel):

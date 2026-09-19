@@ -17,6 +17,8 @@ jobs:
       - run: ruff check apps/api apps/worker sdk/python/src tests
       - run: mypy apps/api apps/worker
       - run: pytest tests/unit tests/integration
+      - run: python scripts/check_wheel_consistency.py
+      - run: python scripts/check_migrations_roundtrip.py
 
   web:
     runs-on: ubuntu-latest

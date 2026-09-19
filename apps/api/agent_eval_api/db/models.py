@@ -102,6 +102,7 @@ class UserRecord(Base):
         DateTime(timezone=True), default=utc_now, nullable=False
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     project: Mapped[ProjectRecord] = relationship(back_populates="users")
 

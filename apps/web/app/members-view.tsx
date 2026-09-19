@@ -15,7 +15,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { API_URL, PROJECT_ID, SESSION, fetchApi, type AuthState } from "./api-client";
+import { API_URL, getSessionToken, fetchApi, type AuthState } from "./api-client";
 
 type Member = {
   id: string;
@@ -31,7 +31,7 @@ type MemberList = { items: Member[]; total: number };
 type Notice = { tone: "success" | "danger" | "neutral"; text: string };
 
 function headers(): HeadersInit {
-  return { "Content-Type": "application/json", "Authorization": `Bearer ${SESSION}` };
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${getSessionToken()}` };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -178,7 +178,7 @@ export function MembersView({ auth }: { auth: AuthState }) {
       setMembers((current) => current.filter((item) => item.id !== member.id));
       setTotal((current) => Math.max(0, current - 1));
       setDeleteTarget(null);
-      setNotice({ tone: "success", text: `已删除账号 ${member.email} 及其数据空间。` });
+      setNotice({ tone: "success", text: `已停用并移除账号 ${member.email}，其数据空间已保留以便追溯。` });
     } catch (error) {
       setNotice({ tone: "danger", text: error instanceof Error ? error.message : "删除成员失败。" });
     } finally {
@@ -286,7 +286,7 @@ export function MembersView({ auth }: { auth: AuthState }) {
               <button type="button" className="icon-button" aria-label="关闭删除确认" title="关闭" onClick={() => setDeleteTarget(null)} disabled={busy}><X size={17} /></button>
             </div>
             <div className="confirm-dialog-body">
-              <p>删除后该账号及其独立数据空间（Project {deleteTarget.project_id}）会被永久删除，无法恢复。请确认。</p>
+              <p>移除后该账号将被停用且无法再登录，但它的独立数据空间（Project {deleteTarget.project_id}）会保留以便追溯与审计，不会被物理删除。请确认。</p>
               <div className="editor-actions">
                 <button type="button" className="outline-button" onClick={() => setDeleteTarget(null)} disabled={busy}>取消</button>
                 <button type="button" className="danger-button-text" onClick={() => void deleteMember(deleteTarget)} disabled={busy}>{busy ? "删除中..." : "确认删除"}</button>

@@ -2,7 +2,8 @@
 
 Covers the full member-management surface: login, listing, creating (with an
 auto-provisioned private project), deactivating, reactivating, resetting a
-password, and deleting a member (which cascade-removes their private project).
+password, and deleting a member (a soft delete that deactivates the account and
+keeps its private project data intact and auditable).
 """
 
 from __future__ import annotations
@@ -141,15 +142,30 @@ def test_admin_creates_lists_deactivates_reactivates_and_deletes_member(
     assert reactivated.status_code == 200
     assert reactivated.json()["active"] is True
 
-    # Delete the member; their private project is cascade-removed.
+    # Delete the member; soft-deletion keeps the row and project but blocks login.
     deleted = client.delete(f"/auth/users/{member['id']}", headers=headers)
     assert deleted.status_code == 204
-    assert session.get(UserRecord, member["id"]) is None
-    assert session.get(ProjectRecord, member["project_id"]) is None
+    deleted_user = session.get(UserRecord, member["id"])
+    assert deleted_user is not None
+    assert deleted_user.deleted_at is not None
+    assert deleted_user.active is False
+    assert session.get(ProjectRecord, member["project_id"]) is not None
 
-    # Listing is back to one.
+    # A soft-deleted account can no longer log in.
+    relogin = client.post(
+        "/auth/login", json={"email": "member@example.com", "password": "member-password"}
+    )
+    assert relogin.status_code == 401
+
+    # Listing excludes the soft-deleted account.
     listed_after = client.get("/auth/users", headers=headers)
     assert listed_after.json()["total"] == 1
+    emails_after = {item["email"] for item in listed_after.json()["items"]}
+    assert "member@example.com" not in emails_after
+
+    # Re-deleting a soft-deleted account returns 404 (idempotent guard).
+    redeleted = client.delete(f"/auth/users/{member['id']}", headers=headers)
+    assert redeleted.status_code == 404
 
 
 def test_admin_cannot_deactivate_or_delete_self(

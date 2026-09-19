@@ -193,6 +193,8 @@ print(result.experiment.id, result.experiment.status)
 pip install -e ".[dev]"
 python -m pytest tests/unit tests/integration sdk/python/tests
 python -m ruff check apps/api apps/worker sdk/python tests
+python scripts/check_wheel_consistency.py
+python scripts/check_migrations_roundtrip.py
 
 Push-Location apps/web
 npm ci

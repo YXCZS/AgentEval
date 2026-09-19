@@ -31,7 +31,8 @@ import { RunsView } from "./runs-view";
 import { TracesView } from "./traces-view";
 import { LoginView } from "./login-view";
 import { MembersView } from "./members-view";
-import { API_URL, PROJECT_ID, SESSION, fetchApi, loadAuth, clearAuth, setSession, AUTH_EXPIRED_EVENT, type AuthState } from "./api-client";
+import { API_URL, getProjectId, getSessionToken, fetchApi } from "./api-client";
+import { AuthProvider, useAuth } from "./auth-context";
 
 type ViewKey =
   | "overview"
@@ -120,7 +121,7 @@ async function requestJson<T>(path: string): Promise<T> {
   const response = await fetchApi(`${API_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${SESSION}`,
+      "Authorization": `Bearer ${getSessionToken()}`,
     },
     cache: "no-store",
   });
@@ -161,10 +162,11 @@ function statusLabel(status: Run["status"] | TraceSummary["status"]): string {
   }[status];
 }
 
-function statusTone(status: Run["status"] | TraceSummary["status"]): "success" | "warning" | "danger" | "neutral" {
+function statusTone(status: Run["status"] | TraceSummary["status"]): "success" | "warning" | "danger" | "live" | "neutral" {
   if (status === "completed") return "success";
   if (status === "failed") return "danger";
   if (status === "partial" || status === "cancelled") return "warning";
+  if (status === "running" || status === "queued") return "live";
   return "neutral";
 }
 
@@ -188,10 +190,10 @@ function Overview({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
     setError(null);
     try {
       const [tracePage, datasets, runPage, reports] = await Promise.all([
-        requestJson<TraceSummaryPage>(`/projects/${PROJECT_ID}/traces?limit=25`),
-        requestJson<Dataset[]>(`/projects/${PROJECT_ID}/datasets`),
-        requestJson<ExperimentPage>(`/projects/${PROJECT_ID}/runs?limit=25`),
-        requestJson<ReportSummary[]>(`/projects/${PROJECT_ID}/reports`),
+        requestJson<TraceSummaryPage>(`/projects/${getProjectId()}/traces?limit=25`),
+        requestJson<Dataset[]>(`/projects/${getProjectId()}/datasets`),
+        requestJson<ExperimentPage>(`/projects/${getProjectId()}/runs?limit=25`),
+        requestJson<ReportSummary[]>(`/projects/${getProjectId()}/reports`),
       ]);
       const normalizedTracePage = normalizeTracePage(tracePage);
       const normalizedRunPage = normalizeRunPage(runPage);
@@ -234,7 +236,7 @@ function Overview({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
     <section className="overview-workbench">
       <section className="welcome-band">
         <div>
-          <p className="eyebrow"><Workflow size={14} /> 当前项目 · {PROJECT_ID}</p>
+          <p className="eyebrow"><Workflow size={14} /> 当前项目 · {getProjectId()}</p>
           <h1>评测总览</h1>
           <p className="lede">查看真实 Agent 上报的 Trace、Experiment、评分和发布结论。</p>
         </div>
@@ -334,38 +336,12 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [selectedTraceId, setSelectedTraceId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
-  const [auth, setAuth] = useState<AuthState | null>(null);
-  const [authReady, setAuthReady] = useState(false);
+  const { auth, ready: authReady, login: handleAuthed, logout: handleLogout } = useAuth();
 
-  useEffect(() => {
-    const existing = loadAuth();
-    if (existing) {
-      setSession(existing);
-      setAuth(existing);
-    }
-    setAuthReady(true);
-  }, []);
-
-  function handleAuthed(next: AuthState) {
-    setAuth(next);
-  }
-
-  function handleLogout() {
-    clearAuth();
-    setAuth(null);
+  function logout() {
+    handleLogout();
     setActiveView("overview");
   }
-
-  // When any protected request returns 401 (expired/revoked session), drop back
-  // to the login screen instead of leaving the user on a stale "logged-in" UI.
-  useEffect(() => {
-    function handleAuthExpired() {
-      setAuth(null);
-      setActiveView("overview");
-    }
-    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
-    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
-  }, []);
 
   function readLocation() {
     const params = new URLSearchParams(window.location.search);
@@ -420,9 +396,9 @@ export default function Home() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">AE</div><div><strong>Agent Eval</strong><span>质量评测工作台</span></div></div>
-        <div className="workspace-current" aria-label="当前项目"><span>我的空间</span><strong>{PROJECT_ID}</strong></div>
+        <div className="workspace-current" aria-label="当前项目"><span>我的空间</span><strong>{getProjectId()}</strong></div>
         <nav aria-label="主导航">{[...navItems, ...(auth.role === "admin" ? adminOnlyNavItems : [])].map(({ key, label, icon: Icon }) => <button className={activeView === key ? "nav-item active" : "nav-item"} key={key} aria-label={label} onClick={() => navigate(key)}><Icon size={18} /><span>{label}</span>{key === "runs" && <i className="nav-count">{activeView === "runs" ? "·" : ""}</i>}</button>)}</nav>
-        <div className="sidebar-bottom"><ApiStatus /><div className="profile" aria-label="当前用户"><div className="avatar">{auth.displayName.slice(0, 2).toUpperCase()}</div><div><strong>{auth.displayName}</strong><span>{auth.email}</span></div><button className="icon-button" title="退出登录" aria-label="退出登录" onClick={handleLogout}><LogOut size={17} /></button></div></div>
+        <div className="sidebar-bottom"><ApiStatus /><div className="profile" aria-label="当前用户"><div className="avatar">{auth.displayName.slice(0, 2).toUpperCase()}</div><div><strong>{auth.displayName}</strong><span>{auth.email}</span></div><button className="icon-button" title="退出登录" aria-label="退出登录" onClick={logout}><LogOut size={17} /></button></div></div>
       </aside>
       <main className="main-content">
         <header className="topbar"><div className="breadcrumb"><span>质量评测工作台</span><b>/</b><strong>{activeLabel}</strong></div><div className="topbar-actions">{searchOpen && <label className="topbar-search"><Search size={15} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") submitSearch(); if (event.key === "Escape") { setSearchOpen(false); setQuery(""); } }} placeholder="搜索导航" aria-label="搜索导航" /></label>}<button className="icon-button" title="搜索导航" aria-label="搜索导航" onClick={() => setSearchOpen((open) => !open)}><Search size={18} /></button><button className="outline-button" onClick={() => navigate("traces")}><Activity size={16} />实时 Trace</button><button className="primary" onClick={() => navigate("runs")}><Play size={16} />新建评测</button></div>{notice && <div className="global-search-notice" role="status">{notice}</div>}</header>

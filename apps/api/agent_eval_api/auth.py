@@ -65,9 +65,9 @@ def get_db() -> Iterator[Session]:
 
 def require_project_access(
     project_id: str,
-    x_project_key: str | None = Header(default=None),
-    x_workspace_session: str | None = Header(default=None),
-    authorization: str | None = Header(default=None),
+    x_project_key: str | None = Header(default=None, include_in_schema=False),
+    x_workspace_session: str | None = Header(default=None, include_in_schema=False),
+    authorization: str | None = Header(default=None, include_in_schema=False),
     db: Session = Depends(get_db),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> AuthContext:

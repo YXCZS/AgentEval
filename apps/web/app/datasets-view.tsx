@@ -21,7 +21,7 @@ import {
   Webhook,
   X,
 } from "lucide-react";
-import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
+import { API_URL, getProjectId, getSessionToken, fetchApi } from "./api-client";
 
 type JsonValue = unknown;
 type Mode = "manual" | "import";
@@ -77,7 +77,7 @@ const emptyMapping = (): Record<CanonicalField, string> => ({
 });
 
 function headers(json = true): HeadersInit {
-  return { ...(json ? { "Content-Type": "application/json" } : {}), "Authorization": `Bearer ${SESSION}` };
+  return { ...(json ? { "Content-Type": "application/json" } : {}), "Authorization": `Bearer ${getSessionToken()}` };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -191,9 +191,9 @@ export function DatasetsView() {
   async function loadCatalog(preferredDatasetId?: string, preferredVersionId?: string) {
     setLoadingCatalog(true);
     try {
-      const nextDatasets = await requestJson<Dataset[]>(`/projects/${PROJECT_ID}/datasets`);
+      const nextDatasets = await requestJson<Dataset[]>(`/projects/${getProjectId()}/datasets`);
       const nextDatasetId = nextDatasets.some((item) => item.id === preferredDatasetId) ? preferredDatasetId! : nextDatasets[0]?.id ?? "";
-      const nextVersions = nextDatasetId ? await requestJson<DatasetVersion[]>(`/projects/${PROJECT_ID}/datasets/${nextDatasetId}/versions`) : [];
+      const nextVersions = nextDatasetId ? await requestJson<DatasetVersion[]>(`/projects/${getProjectId()}/datasets/${nextDatasetId}/versions`) : [];
       const nextVersionId = nextVersions.some((item) => item.id === preferredVersionId) ? preferredVersionId! : nextVersions.find((item) => item.id === nextDatasets.find((dataset) => dataset.id === nextDatasetId)?.current_version_id)?.id ?? nextVersions.at(-1)?.id ?? "";
       setDatasets(nextDatasets); setSelectedDatasetId(nextDatasetId); setVersions(nextVersions); setSelectedVersionId(nextVersionId);
     } catch (error) {
@@ -204,7 +204,7 @@ export function DatasetsView() {
   async function selectDataset(datasetId: string) {
     setSelectedDatasetId(datasetId); setSelectedVersionId("");
     try {
-      const nextVersions = await requestJson<DatasetVersion[]>(`/projects/${PROJECT_ID}/datasets/${datasetId}/versions`);
+      const nextVersions = await requestJson<DatasetVersion[]>(`/projects/${getProjectId()}/datasets/${datasetId}/versions`);
       const dataset = datasets.find((item) => item.id === datasetId);
       setVersions(nextVersions); setSelectedVersionId(nextVersions.find((item) => item.id === dataset?.current_version_id)?.id ?? nextVersions.at(-1)?.id ?? "");
     } catch (error) { setNotice({ tone: "danger", text: `加载 Dataset 版本失败：${error instanceof Error ? error.message : "未知错误"}` }); }
@@ -231,7 +231,7 @@ export function DatasetsView() {
   async function resetImport() {
     const datasetId = pendingDatasetId;
     setFile(null); setFileText(""); setFields([]); setPreview(null); setPendingDatasetId(null); setMapping(emptyMapping());
-     if (datasetId) { try { await requestJson<void>(`/projects/${PROJECT_ID}/datasets/${datasetId}/imports/cancel`, { method: "POST" }); } catch { setNotice({ tone: "danger", text: "清理预览 Dataset 失败，请检查 API" }); } }
+     if (datasetId) { try { await requestJson<void>(`/projects/${getProjectId()}/datasets/${datasetId}/imports/cancel`, { method: "POST" }); } catch { setNotice({ tone: "danger", text: "清理预览 Dataset 失败，请检查 API" }); } }
   }
 
   async function previewImport() {
@@ -240,12 +240,12 @@ export function DatasetsView() {
     if (!mapping.id || !mapping.input) { setNotice({ tone: "danger", text: "请映射必填字段：用例 ID 和输入" }); return; }
     setBusy(true); setNotice(null); let createdId: string | null = null;
     try {
-      const dataset = await requestJson<Dataset>(`/projects/${PROJECT_ID}/datasets`, { method: "POST", body: JSON.stringify({ name: name.trim(), description, cases: [] }) });
+      const dataset = await requestJson<Dataset>(`/projects/${getProjectId()}/datasets`, { method: "POST", body: JSON.stringify({ name: name.trim(), description, cases: [] }) });
       createdId = dataset.id; setPendingDatasetId(dataset.id);
-      const result = await requestJson<Preview>(`/projects/${PROJECT_ID}/datasets/${dataset.id}/imports/preview`, { method: "POST", body: JSON.stringify({ format, content_base64: encodeBase64(fileText), field_mapping: mappedFields }) });
+      const result = await requestJson<Preview>(`/projects/${getProjectId()}/datasets/${dataset.id}/imports/preview`, { method: "POST", body: JSON.stringify({ format, content_base64: encodeBase64(fileText), field_mapping: mappedFields }) });
       setPreview(result); setNotice({ tone: result.issues.length ? "neutral" : "success", text: `预览完成：${result.cases.length} 条有效用例，${result.issues.length} 条问题` });
     } catch (error) {
-      if (createdId) { try { await requestJson<void>(`/projects/${PROJECT_ID}/datasets/${createdId}`, { method: "DELETE", headers: headers(false) }); } catch { /* 保留原始错误 */ } }
+      if (createdId) { try { await requestJson<void>(`/projects/${getProjectId()}/datasets/${createdId}`, { method: "DELETE", headers: headers(false) }); } catch { /* 保留原始错误 */ } }
       setPendingDatasetId(null); setNotice({ tone: "danger", text: `导入预览失败：${error instanceof Error ? error.message : "未知错误"}` });
     } finally { setBusy(false); }
   }
@@ -254,7 +254,7 @@ export function DatasetsView() {
     if (!pendingDatasetId || !preview) return;
     setBusy(true); setNotice(null);
     try {
-      const result = await requestJson<{ dataset_version: DatasetVersion; issues: ImportIssue[] }>(`/projects/${PROJECT_ID}/datasets/${pendingDatasetId}/imports/commit`, { method: "POST", body: JSON.stringify({ format, content_base64: encodeBase64(fileText), field_mapping: mappedFields, allow_partial: preview.issues.length > 0 }) });
+      const result = await requestJson<{ dataset_version: DatasetVersion; issues: ImportIssue[] }>(`/projects/${getProjectId()}/datasets/${pendingDatasetId}/imports/commit`, { method: "POST", body: JSON.stringify({ format, content_base64: encodeBase64(fileText), field_mapping: mappedFields, allow_partial: preview.issues.length > 0 }) });
       setNotice({ tone: "success", text: `导入成功，已创建 Dataset Version ${result.dataset_version.version}` });
       setPreview(null); setFile(null); setFileText(""); setPendingDatasetId(null); await loadCatalog(pendingDatasetId, result.dataset_version.id);
     } catch (error) { setNotice({ tone: "danger", text: `导入提交失败：${error instanceof Error ? error.message : "未知错误"}` }); } finally { setBusy(false); }
@@ -265,7 +265,7 @@ export function DatasetsView() {
     if (cases.some((row) => !row.id.trim() || !row.input.trim())) { setNotice({ tone: "danger", text: "每条用例都必须填写 ID 和输入" }); return; }
     setBusy(true); setNotice(null);
     try {
-      const created = await requestJson<Dataset>(`/projects/${PROJECT_ID}/datasets`, { method: "POST", body: JSON.stringify({ name: name.trim(), description, cases: cases.map(caseFromManual) }) });
+      const created = await requestJson<Dataset>(`/projects/${getProjectId()}/datasets`, { method: "POST", body: JSON.stringify({ name: name.trim(), description, cases: cases.map(caseFromManual) }) });
       setNotice({ tone: "success", text: `Dataset 已创建，包含 ${cases.length} 条用例` }); setCases([emptyCase()]); setName(""); setDescription(""); await loadCatalog(created.id, created.current_version_id ?? undefined);
     } catch (error) { setNotice({ tone: "danger", text: `Dataset 创建失败：${error instanceof Error ? error.message : "未知错误"}` }); } finally { setBusy(false); }
   }
@@ -312,12 +312,12 @@ function RemoteTriggerPanel({ dataset }: { dataset: Dataset }) {
     setBusy(true);
     setMessage("");
     try {
-      const response = await fetchApi(`${API_URL}/projects/${PROJECT_ID}/datasets/${dataset.id}/remote-trigger`, { headers: headers() });
+      const response = await fetchApi(`${API_URL}/projects/${getProjectId()}/datasets/${dataset.id}/remote-trigger`, { headers: headers() });
       if (response.status === 404) { setTrigger(null); setDeliveries([]); return; }
       const body = await response.json() as RemoteTrigger;
       if (!response.ok) throw new Error("加载 Remote Trigger 失败。");
       setTrigger(body); setTriggerUrl(body.trigger_url);
-      const deliveryRows = await requestJson<RemoteTriggerDelivery[]>(`/projects/${PROJECT_ID}/datasets/${dataset.id}/remote-trigger/deliveries`);
+      const deliveryRows = await requestJson<RemoteTriggerDelivery[]>(`/projects/${getProjectId()}/datasets/${dataset.id}/remote-trigger/deliveries`);
       setDeliveries(deliveryRows);
     } catch (error) { setMessage(error instanceof Error ? error.message : "加载 Remote Trigger 失败。"); } finally { setBusy(false); }
   }
@@ -328,7 +328,7 @@ function RemoteTriggerPanel({ dataset }: { dataset: Dataset }) {
     if (!triggerUrl.trim()) { setMessage("请填写远程运行器接收 URL。"); return; }
     setBusy(true); setMessage("");
     try {
-      const created = await requestJson<RemoteTriggerCreated>(`/projects/${PROJECT_ID}/datasets/${dataset.id}/remote-trigger`, { method: "POST", body: JSON.stringify({ trigger_url: triggerUrl.trim(), enabled: true }) });
+      const created = await requestJson<RemoteTriggerCreated>(`/projects/${getProjectId()}/datasets/${dataset.id}/remote-trigger`, { method: "POST", body: JSON.stringify({ trigger_url: triggerUrl.trim(), enabled: true }) });
       setTrigger(created); setOneTimeSecret(created.signing_secret); setDeliveries([]); setMessage("Remote Trigger 已创建。请立即将一次性签名密钥保存到运行器的 Secret Manager。");
     } catch (error) { setMessage(error instanceof Error ? error.message : "创建 Remote Trigger 失败。"); } finally { setBusy(false); }
   }
@@ -337,7 +337,7 @@ function RemoteTriggerPanel({ dataset }: { dataset: Dataset }) {
     if (!trigger) return;
     setBusy(true); setMessage("");
     try {
-      const updated = await requestJson<RemoteTrigger>(`/projects/${PROJECT_ID}/datasets/${dataset.id}/remote-trigger`, { method: "PATCH", body: JSON.stringify({ enabled }) });
+      const updated = await requestJson<RemoteTrigger>(`/projects/${getProjectId()}/datasets/${dataset.id}/remote-trigger`, { method: "PATCH", body: JSON.stringify({ enabled }) });
       setTrigger(updated);
     } catch (error) { setMessage(error instanceof Error ? error.message : "更新 Remote Trigger 失败。"); } finally { setBusy(false); }
   }

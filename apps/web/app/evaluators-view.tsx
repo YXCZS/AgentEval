@@ -10,7 +10,7 @@ import {
   Plus,
   Save,
 } from "lucide-react";
-import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
+import { API_URL, getProjectId, getSessionToken, fetchApi } from "./api-client";
 
 type EvaluatorType = "deterministic" | "llm_judge" | "adapter" | "human";
 type AgentType = "rag" | "tool" | "custom";
@@ -62,7 +62,7 @@ const agentTypeLabels: Record<AgentType, string> = {
 };
 
 function headers(): HeadersInit {
-  return { "Content-Type": "application/json", "Authorization": `Bearer ${SESSION}` };
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${getSessionToken()}` };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -146,8 +146,8 @@ export function EvaluatorsView() {
     setLoading(true);
     try {
       const [loaded, providerRows] = await Promise.all([
-        requestJson<Evaluator[]>(`/projects/${PROJECT_ID}/evaluators`),
-        requestJson<ProviderConnection[]>(`/projects/${PROJECT_ID}/provider-connections`),
+        requestJson<Evaluator[]>(`/projects/${getProjectId()}/evaluators`),
+        requestJson<ProviderConnection[]>(`/projects/${getProjectId()}/provider-connections`),
       ]);
       setEvaluators(loaded);
       setProviders(providerRows.filter((provider) => provider.enabled && provider.status === "active"));
@@ -226,7 +226,7 @@ export function EvaluatorsView() {
     setBusy(true);
     setNotice(null);
     try {
-      const created = await requestJson<Evaluator>(`/projects/${PROJECT_ID}/evaluators`, {
+      const created = await requestJson<Evaluator>(`/projects/${getProjectId()}/evaluators`, {
         method: "POST",
         body: JSON.stringify({
           name: name.trim(),
@@ -267,7 +267,7 @@ export function EvaluatorsView() {
     setBusy(true);
     setNotice(null);
     try {
-      const updated = await requestJson<Evaluator>(`/projects/${PROJECT_ID}/evaluators/${item.id}/enabled?enabled=${!item.enabled}`, { method: "PATCH" });
+      const updated = await requestJson<Evaluator>(`/projects/${getProjectId()}/evaluators/${item.id}/enabled?enabled=${!item.enabled}`, { method: "PATCH" });
       setEvaluators((current) => current.map((candidate) => candidate.id === updated.id ? updated : candidate));
       setNotice(`${updated.name} ${updated.version} 已${updated.enabled ? "启用" : "停用"}。`);
     } catch (error) {

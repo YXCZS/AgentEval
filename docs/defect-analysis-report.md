@@ -27,7 +27,7 @@
 ### P1-3 删除成员是"硬删除"且不可撤销
 **现象**：`DELETE /auth/users/{id}` 级联删除该成员的私有 project 及其全部数据（trace/实验/报告），无软删除、无回收站、无二次确认的审计留痕。
 **影响**：误删即数据灾难，且无法追溯。
-**建议**：改为软删除（标记 `deleted_at` + 保留数据 N 天），或至少提供"导出该成员数据"后再删除的引导。
+**状态**：✅ 已修复——改为软删除：`users` 表新增 `deleted_at` 字段（迁移 `j4d5e6f7a8b9`），删除时标记 `deleted_at` + 停用 `active`，保留 user 与 project 数据；列表与登录均排除已删账号，重复删除返回 404。数据可追溯、可恢复。
 
 ### P2-1 新手引导缺失
 **现象**：空项目时总览有 `overview-empty` 引导，但进入数据集/评估器/Release 等模块后，没有 step-by-step 的上手指引或"首次使用引导"。
@@ -50,7 +50,7 @@
 
 ### P2-1 状态色语义未完全统一
 **现象**：`success/danger/warning` 状态色已定义，但部分状态标签（如 Trace 的 `queued/running`）用的是中性灰，与"进行中"应有的视觉区分不够；`cancelled` 与 `partial` 共用 warning 色，语义可再细化。
-**建议**：给 `running` 一个脉动动画或主题色，让"正在跑"的状态一眼可见。
+**状态**：✅ 已修复——`statusTone` 区分 `running`/`queued` 为 `live`，新增 `.status-live` 样式（品牌蓝 + 1.4s 脉动动画），"正在跑"一眼可见。
 
 ### P2-2 移动端/小屏适配不完整
 **现象**：虽然已有 `@media` 响应式规则，但侧边栏在窄屏下仍是固定 248px 顶栏式布局，成员管理卡片在小屏下操作按钮可能换行拥挤。
@@ -66,12 +66,11 @@
 
 ### P1-1 前端缺全局 401 与错误边界测试
 **现象**：后端集成测试覆盖充分（auth/datasets/runs/reports/traces/users 等 18 个文件），但前端 e2e 未覆盖"token 过期 → 跳登录"这一关键负路径。
-**建议**：新增一条 e2e：模拟 401 响应，断言自动登出并跳转登录页。
+**状态**：✅ 已修复——新增 `apps/web/e2e/auth-expired.spec.ts`，模拟受保护请求返回 401，断言自动登出并跳转登录页、本地会话被清除；并补一条 200 正常路径对照。
 
 ### P1-2 SDK wheel 过时（已修复，需加回归护栏）
-**现象**：`sdk/python/dist/*.whl` 是旧构建，`models.py` 仍含已废弃的 `agent_connection_id`/`endpoint_config` 字段，`runner.py` 缺失 `_finalize`/`_refresh_finalized_items`（服务端评测器等待 + 证据回填）。**本轮已重建 wheel**。
-**遗留**：缺一个"wheel 与 src 一致性"的 CI 校验，防止再次漂移。
-**建议**：加 CI 步骤——构建 wheel 后逐文件 diff `src/`，不一致即 fail。
+**现象**：`sdk/python/dist/*.whl` 是旧构建，`models.py` 仍含已废弃的 `agent_connection_id`/`endpoint_config` 字段，`runner.py` 缺失 `_finalize`/`_refresh_finalized_items`（服务端评测器等待 + 证据回填）。**上轮已重建 wheel**。
+**状态**：✅ 已修复——新增 `scripts/check_wheel_consistency.py`（对比 wheel 内 `agent_eval/*.py` 与 `src/` 一致性，不一致即非零退出），并接入 CI。
 
 ### P1-3 临时驱动脚本未清理
 **现象**：`tests/live/_drive_tool_acceptance.py` 是验收用的临时驱动脚本（下划线前缀），已混入源码树。
@@ -96,11 +95,11 @@
 
 ### P1-1 前端全局可变状态（模块级 let）
 **现象**：`api-client.ts` 里 `PROJECT_ID`、`SESSION` 是模块级 `let` 可变绑定，登录时被改写。所有 view 直接 import 读取。这是隐式全局状态，多用户切换/SSR/hot-reload 时存在时序与并发隐患。
-**建议**：改为 React Context（AuthProvider）或至少提供 `getSession()` 访问器，避免直接读裸变量。
+**状态**：✅ 已修复——`PROJECT_ID`/`SESSION` 收敛为模块私有 store + `getProjectId()`/`getSessionToken()` 访问器（单一 `setSession` 写入口）；新增 `AuthProvider`/`useAuth()` React Context，登录态从 `page.tsx` 的本地 state 提升为 Context，`login`/`logout`/401 跳转统一由 Provider 管理，所有 view 改为通过 getter 读取会话。
 
 ### P1-2 缺少统一的错误监控与告警
 **现象**：后端有 OpenTelemetry trace 采集，但无错误聚合（如 Sentry）、无日志结构化检索、无 Worker 任务失败告警。Celery worker 任务失败后难以及时发现。
-**建议**：接入 Sentry/自建错误采集 + worker 失败队列监控 + 健康检查告警（已有 `/health`，补告警规则即可）。
+**状态**：✅ 已修复——新增 `observability.py`（结构化日志：`api_error`/`worker_task_failed`）；`main.py` 加全局异常处理器（500 统一记录）；`celery_app.py` 注册 `task_failure` 信号钩子；`docs/operations.md` 补「监控与告警」章节（告警规则 + 采集方案）。
 
 ### P1-3 数据删除是物理级联，无备份触发
 **现象**：删除成员级联删 project 数据是直接物理删除（见产品视角 P1-3），且未与 `backups/` 机制联动。
@@ -108,11 +107,11 @@
 
 ### P2-1 端口/环境变量文档化不足
 **现象**：`.env` 中 `18080` 与容器内 `8000` 的映射关系、`NEXT_PUBLIC_API_URL` 的前后端拼接，散落在各处，易漂移（上轮已确认当前一致）。
-**建议**：在 `docs/operations.md` 统一一张"环境变量 + 端口映射"对照表，并加 CI 校验。
+**状态**：✅ 已修复——`docs/operations.md` 补全环境变量对照表（含 `APP_ENV`/`JWT_SECRET`/`NEXT_PUBLIC_API_URL` 等），端口映射关系统一说明。
 
 ### P2-2 数据库迁移回滚演练未自动化
 **现象**：`migrations/` 用 Alembic，有 `database-migration-rehearsal.md` 文档，但迁移的升级/回滚演练是手工的。
-**建议**：CI 中加"空库 upgrade + downgrade 往返"自动化演练。
+**状态**：✅ 已修复——新增 `scripts/check_migrations_roundtrip.py`（空库 `upgrade head → downgrade floor → upgrade head` 往返，floor 为最后一个数据迁移 `b9d0c02d2e51`，其后均为结构迁移），接入 CI。
 
 ### P2-3 `.workbuddy/` 未纳入版本控制忽略（已修复）
 **现象**：项目内存目录 `.workbuddy/` 未被 `.gitignore` 排除，可能误提交。**本轮已补充**。
@@ -123,14 +122,19 @@
 
 | 级别 | 编号 | 问题 | 状态 |
 | --- | --- | --- | --- |
-| P0 | 全栈-1 | 生产密钥弱默认值无强制校验 | ✅ 已修复（本轮） |
-| P1 | 产品-1 | 登录态过期无感知、无 401 全局处理 | ✅ 已修复（本轮） |
+| P0 | 全栈-1 | 生产密钥弱默认值无强制校验 | ✅ 已修复（上轮） |
+| P1 | 产品-1 | 登录态过期无感知、无 401 全局处理 | ✅ 已修复（上轮） |
 | P1 | 产品-2 | 停用成员后旧 token 仍有效 | ✅ 误判，已核实早已正确 |
-| P1 | 产品-3 | 删除成员硬删除不可撤销 | 待修 |
-| P1 | 测试-1 | 前端缺 401 负路径 e2e | 待修（可补） |
-| P1 | 测试-2 | SDK wheel 过时（缺 CI 护栏） | ✅ 已重建，护栏待加 |
-| P1 | UI-1/2 | 主按钮层级 + 角色徽章 | ✅ 本轮已美化 |
-| P2 | 多项 | 引导/配额/单测/压测/监控/文档 | 排期优化 |
+| P1 | 产品-3 | 删除成员硬删除不可撤销 | ✅ 已修复（本轮软删除） |
+| P1 | 测试-1 | 前端缺 401 负路径 e2e | ✅ 已修复（本轮补 auth-expired.spec） |
+| P1 | 测试-2 | SDK wheel 过时（缺 CI 护栏） | ✅ 已修复（本轮加一致性校验） |
+| P1 | UI-1/2 | 主按钮层级 + 角色徽章 | ✅ 上轮已美化 |
+| P1 | 全栈-1 | 前端模块级全局可变状态 | ✅ 已修复（本轮 React Context + getter） |
+| P1 | 全栈-2 | 缺错误监控与告警 | ✅ 已修复（本轮结构化日志 + 告警钩子） |
+| P2 | 全栈-1 | 端口/环境变量文档化不足 | ✅ 已修复（本轮补对照表） |
+| P2 | 全栈-2 | 迁移回滚演练未自动化 | ✅ 已修复（本轮往返演练脚本） |
+| P2 | UI-1 | 状态色语义未统一 | ✅ 已修复（本轮 running 脉动态） |
+| P2 | 其余 | 引导/配额/单测/压测 | 排期（非阻断） |
 
 ---
 
@@ -142,4 +146,16 @@
 4. **端口漂移确认**：当前 `18080→8000` 映射一致，无漂移。
 5. **生产密钥强校验（P0）**：`settings.py` 增加 `model_validator`，production 下拒绝弱默认 JWT/salt/session secret，3 个单测覆盖。
 6. **前端全局 401 处理（P1）**：`fetchApi` 拦截 401（排除登录接口）→ 清会话 + 派发事件 → 跳登录；`loadAuth` 解析 JWT `exp` 提前判定过期。
+
+## 八、后续一轮已完成的修复（2026-09-19）
+
+1. **成员软删除（P1-3）**：`users.deleted_at` 字段 + 迁移 `j4d5e6f7a8b9`，删除改为标记 + 停用，数据可追溯可恢复；前端删除确认文案同步更新。
+2. **前端全局状态 React Context 重构（P1-1 全栈）**：`PROJECT_ID`/`SESSION` 收敛为 store + `getProjectId()`/`getSessionToken()` 访问器；新增 `AuthProvider`/`useAuth()`，登录/登出/401 统一由 Context 管理；layout.tsx 包裹 Provider。
+3. **前端 401 负路径 e2e（P1-1 测试）**：新增 `auth-expired.spec.ts`（401 自动登出 + 200 对照）。
+4. **SDK wheel 一致性 CI 护栏（P1-2 测试）**：`scripts/check_wheel_consistency.py` + CI 接入。
+5. **错误监控与告警（P1-2 全栈）**：`observability.py` 结构化日志 + 全局异常处理器 + Celery `task_failure` 信号 + 告警文档。
+6. **鉴权 header 脱敏**：`require_project_access`/`get_current_user_from_bearer` 的 `authorization` 等 header 加 `include_in_schema=False`，修复 OpenAPI 暴露敏感字段（顺带修好一个既有测试失败）。
+7. **迁移回滚演练（P2-2 全栈）**：`scripts/check_migrations_roundtrip.py` + CI 接入。
+8. **环境变量/端口文档（P2-1 全栈）**：`docs/operations.md` 补全对照表。
+9. **状态色语义（P2-1 UI）**：running/queued 增加 `.status-live` 脉动态。
 

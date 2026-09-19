@@ -10,13 +10,20 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 
 | 变量 | 用途 |
 | --- | --- |
+| `APP_ENV` | 运行环境：`development` / `test` / `production`。生产环境拒绝弱默认密钥启动 |
 | `DATABASE_URL` | PostgreSQL 连接地址 |
 | `REDIS_URL` | Redis/Celery 地址 |
+| `JWT_SECRET` | 浏览器 JWT 签名密钥（HS256）。生产必须设为强随机值 |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | JWT 过期时长（分钟），默认 7 天 |
 | `API_KEY_SALT` | Project API Key 哈希盐 |
 | `WORKSPACE_SESSION_SECRET` | 浏览器会话秘密 |
 | `AGENT_EVAL_WEB_PORT` | Web 暴露到宿主机的端口，默认 `3000` |
 | `AGENT_EVAL_API_PORT` | API 暴露到宿主机的端口，默认 `8000` |
+| `NEXT_PUBLIC_API_URL` | Web 访问 API 的地址（容器内默认 `http://api:8000`） |
+| `AGENT_EVAL_BASE_URL` | SDK/CI 访问 API 的宿主机地址 |
 | `TRACE_MAX_FIELD_BYTES` | Trace 字段限制 |
+| `TRACE_MAX_REQUEST_BYTES` | 单次 Trace 摄入请求体大小上限 |
+| `TRACE_MAX_SPANS` | 单条 Trace 的 Span 数上限 |
 | `TRACE_REDACTION_FIELD_NAMES` | 脱敏字段名 |
 | `WORKER_MAX_CONCURRENCY` | 后台 Worker 并发上限 |
 
@@ -89,3 +96,30 @@ $candidates | ForEach-Object { rg -l -i 'sk-[A-Za-z0-9]{20,}|authorization:\s*be
 ```
 
 命令检查已跟踪文件和未被 `.gitignore` 排除的候选提交文件，不读取被忽略的 `.env`。不要把 `.env` 内容粘贴到日志或提交记录。提交前确认 `.env`、数据库、日志、`artifacts` 和构建缓存均未被跟踪，并使用 Gitleaks 等工具扫描 Git 历史。
+
+## 监控与告警
+
+自托管部署不依赖外部 SaaS 错误追踪。API 与 Worker 会把可机器读取的结构化错误写入标准错误流，可作为告警的数据源：
+
+- **`api_error`**：API 每次未处理异常都会输出一条，含 `method`、`path`、`status=500`、`detail` 和异常类型。按「5xx 比例」或「单位时间条数」设置告警阈值即可。
+- **`worker_task_failed`**：Celery 任务最终失败（重试耗尽）时输出一条，含 `task` 与 `task_id`。建议对非零计数告警。
+
+采集与告警的推荐做法（任选其一，均无需改动应用代码）：
+
+1. **容器日志聚合**：把 `api` 与 `worker` 容器的 stderr 接入 Loki/ELK/自建采集器，对上述关键字配置日志告警。
+2. **健康检查探活**：`GET /health` 为进程存活、`GET /ready` 为数据库可用（不可用时返回 503）。用 `curl --fail` 或编排平台的探针做「进程存活 + 就绪」双告警。
+
+最小告警规则示例（Prometheus Alertmanager 语义，按需适配）：
+
+| 指标 / 日志 | 条件 | 级别 |
+| --- | --- | --- |
+| `GET /ready` 返回非 200 | 持续 2 分钟 | 严重 |
+| `api_error`（status=500）条数 | 5 分钟窗口 > 20 条 | 严重 |
+| `worker_task_failed` 条数 | 5 分钟窗口 > 0 条 | 警告 |
+
+日志示例（stderr 结构化输出）：
+
+```text
+2026-09-19T15:00:00+0800 ERROR agent_eval.observability api_error method=POST path=/projects/p1/traces/ingest status=500 detail=internal server error exc=ValueError:bad span
+2026-09-19T15:00:01+0800 ERROR agent_eval.observability worker_task_failed task=agent_eval.execute_managed_judge task_id=abc123 exc=ConnectionError:provider unavailable
+```

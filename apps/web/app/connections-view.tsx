@@ -17,7 +17,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
+import { API_URL, getProjectId, getSessionToken, fetchApi } from "./api-client";
 
 type AgentType = "rag" | "tool" | "custom";
 type Release = {
@@ -72,7 +72,7 @@ const typeLabels: Record<AgentType, string> = {
 };
 
 function headers(): HeadersInit {
-  return { "Content-Type": "application/json", "Authorization": `Bearer ${SESSION}` };
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${getSessionToken()}` };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -135,7 +135,7 @@ export function ConnectionsView() {
   const sdkEnvironment = useMemo(
     () => [
       `AGENT_EVAL_API_URL=${API_URL}`,
-      `AGENT_EVAL_PROJECT_ID=${PROJECT_ID}`,
+      `AGENT_EVAL_PROJECT_ID=${getProjectId()}`,
       "AGENT_EVAL_API_KEY=<仅粘贴刚创建的 Project Key>",
     ].join("\n"),
     [],
@@ -145,9 +145,9 @@ export function ConnectionsView() {
     setLoading(true);
     try {
       const [releaseRows, keyRows, providerRows] = await Promise.all([
-        requestJson<Release[]>(`/projects/${PROJECT_ID}/agent-releases`),
-        requestJson<ProjectKey[]>(`/projects/${PROJECT_ID}/api-keys`),
-        requestJson<ProviderConnection[]>(`/projects/${PROJECT_ID}/provider-connections`),
+        requestJson<Release[]>(`/projects/${getProjectId()}/agent-releases`),
+        requestJson<ProjectKey[]>(`/projects/${getProjectId()}/api-keys`),
+        requestJson<ProviderConnection[]>(`/projects/${getProjectId()}/provider-connections`),
       ]);
       setReleases(releaseRows);
       setKeys(keyRows);
@@ -178,7 +178,7 @@ export function ConnectionsView() {
     event.preventDefault();
     setBusy(true);
     try {
-      const created = await requestJson<Release>(`/projects/${PROJECT_ID}/agent-releases`, {
+      const created = await requestJson<Release>(`/projects/${getProjectId()}/agent-releases`, {
         method: "POST",
         body: JSON.stringify({ label: label.trim(), agent_type: agentType, release_identity: releaseIdentity.trim(), source_revision: sourceRevision.trim() || null, metadata: {} }),
       });
@@ -195,7 +195,7 @@ export function ConnectionsView() {
     event.preventDefault();
     setBusy(true); setCreatedKey("");
     try {
-      const created = await requestJson<CreatedProjectKey>(`/projects/${PROJECT_ID}/api-keys`, { method: "POST", body: JSON.stringify({ name: keyName.trim() }) });
+      const created = await requestJson<CreatedProjectKey>(`/projects/${getProjectId()}/api-keys`, { method: "POST", body: JSON.stringify({ name: keyName.trim() }) });
       setKeys((current) => [created, ...current]);
       setCreatedKey(created.key); setKeyFormOpen(false);
       setNotice({ tone: "success", text: "Project Key 已创建，明文只显示这一次。" });
@@ -207,7 +207,7 @@ export function ConnectionsView() {
   async function revokeKey(key: ProjectKey) {
     setBusy(true);
     try {
-      await requestJson<void>(`/projects/${PROJECT_ID}/api-keys/${key.id}`, { method: "DELETE" });
+      await requestJson<void>(`/projects/${getProjectId()}/api-keys/${key.id}`, { method: "DELETE" });
       setKeys((current) => current.map((item) => item.id === key.id ? { ...item, active: false } : item));
       setNotice({ tone: "success", text: `Project Key“${key.name}”已撤销。` });
     } catch (error) {
@@ -230,7 +230,7 @@ export function ConnectionsView() {
     if (!apiKey) { setNotice({ tone: "danger", text: "请填写 Provider API Key 后再测试。" }); return; }
     setBusy(true); setNotice(null);
     try {
-      const result = await requestJson<ProviderTest>(`/projects/${PROJECT_ID}/provider-connections/test`, { method: "POST", body: JSON.stringify(providerPayload(apiKey)) });
+      const result = await requestJson<ProviderTest>(`/projects/${getProjectId()}/provider-connections/test`, { method: "POST", body: JSON.stringify(providerPayload(apiKey)) });
       setProviderTest(result);
       setNotice({ tone: "success", text: "真实 Provider 测试成功。请重新输入 API Key 后保存连接。" });
     } catch (error) {
@@ -249,7 +249,7 @@ export function ConnectionsView() {
     if (!apiKey) { setNotice({ tone: "danger", text: "请重新输入 API Key 后保存连接。" }); return; }
     setBusy(true); setNotice(null);
     try {
-      const created = await requestJson<ProviderConnection>(`/projects/${PROJECT_ID}/provider-connections`, {
+      const created = await requestJson<ProviderConnection>(`/projects/${getProjectId()}/provider-connections`, {
         method: "POST",
         body: JSON.stringify({ name: providerName.trim(), ...providerPayload(apiKey) }),
       });
@@ -267,7 +267,7 @@ export function ConnectionsView() {
   async function toggleProvider(provider: ProviderConnection) {
     setBusy(true);
     try {
-      const updated = await requestJson<ProviderConnection>(`/projects/${PROJECT_ID}/provider-connections/${provider.id}/enabled?enabled=${!provider.enabled}`, { method: "PATCH" });
+      const updated = await requestJson<ProviderConnection>(`/projects/${getProjectId()}/provider-connections/${provider.id}/enabled?enabled=${!provider.enabled}`, { method: "PATCH" });
       setProviders((current) => current.map((item) => item.id === updated.id ? updated : item));
       setNotice({ tone: "success", text: `Provider“${updated.name}”已${updated.enabled ? "启用" : "停用"}。` });
     } catch (error) {
@@ -282,7 +282,7 @@ export function ConnectionsView() {
     if (!apiKey) { setNotice({ tone: "danger", text: "请填写新的 Provider API Key。" }); return; }
     setBusy(true);
     try {
-      const updated = await requestJson<ProviderConnection>(`/projects/${PROJECT_ID}/provider-connections/${rotateTarget.id}/rotate`, { method: "POST", body: JSON.stringify({ api_key: apiKey }) });
+      const updated = await requestJson<ProviderConnection>(`/projects/${getProjectId()}/provider-connections/${rotateTarget.id}/rotate`, { method: "POST", body: JSON.stringify({ api_key: apiKey }) });
       setProviders((current) => current.map((item) => item.id === updated.id ? updated : item));
       setRotateTarget(null);
       setNotice({ tone: "success", text: `Provider“${updated.name}”的凭据已轮换并重新验证。` });
@@ -297,7 +297,7 @@ export function ConnectionsView() {
   async function deleteProvider(provider: ProviderConnection) {
     setBusy(true);
     try {
-      await requestJson<void>(`/projects/${PROJECT_ID}/provider-connections/${provider.id}`, { method: "DELETE" });
+      await requestJson<void>(`/projects/${getProjectId()}/provider-connections/${provider.id}`, { method: "DELETE" });
       setProviders((current) => current.filter((item) => item.id !== provider.id));
       setDeleteTarget(null);
       setNotice({ tone: "success", text: `Provider“${provider.name}”已删除。` });

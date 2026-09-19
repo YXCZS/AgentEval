@@ -17,7 +17,7 @@ import {
   Target,
   XCircle,
 } from "lucide-react";
-import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
+import { API_URL, getProjectId, getSessionToken, fetchApi } from "./api-client";
 
 type AgentType = "rag" | "tool" | "custom";
 type RunStatus = "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
@@ -105,7 +105,7 @@ type DatasetOption = DatasetVersion & { datasetId: string; datasetName: string; 
 type Notice = { tone: "success" | "danger" | "neutral"; text: string };
 
 function requestHeaders(): HeadersInit {
-  return { "Content-Type": "application/json", "Authorization": `Bearer ${SESSION}` };
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${getSessionToken()}` };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -202,7 +202,7 @@ function integrationSnippet(run: Run, dataset: DatasetOption): string {
   if (run.execution_mode === "otel") {
     return [
       "# Add these attributes to the root OpenTelemetry/OpenInference task Span.",
-      `agent_eval.project.id=${PROJECT_ID}`,
+      `agent_eval.project.id=${getProjectId()}`,
       `agent_eval.experiment.id=${run.id}`,
       "agent_eval.experiment.item.id=<item_id_from_manifest>",
       `agent_eval.dataset.id=${dataset.datasetId}`,
@@ -217,7 +217,7 @@ function integrationSnippet(run: Run, dataset: DatasetOption): string {
   }
 
   const baseUrl = API_URL.replace(/\/$/, "");
-  const manifestUrl = `${baseUrl}/projects/${PROJECT_ID}/experiments/${run.id}/manifest`;
+  const manifestUrl = `${baseUrl}/projects/${getProjectId()}/experiments/${run.id}/manifest`;
   if (run.execution_mode === "remote_upload") {
     return [
       "# Read AGENT_EVAL_PROJECT_KEY from your runtime Secret Manager, not source code.",
@@ -289,12 +289,12 @@ export function RunsView({
   const progress = run && run.total_cases > 0 ? Math.round((terminalCases / run.total_cases) * 100) : 0;
 
   async function loadManifest(experimentId: string, offset = manifestOffset): Promise<ManifestPage> {
-    return requestJson<ManifestPage>(`/projects/${PROJECT_ID}/experiments/${experimentId}/manifest?offset=${offset}&limit=25`);
+    return requestJson<ManifestPage>(`/projects/${getProjectId()}/experiments/${experimentId}/manifest?offset=${offset}&limit=25`);
   }
 
   async function loadExperiment(experimentId: string, offset = manifestOffset) {
     const [detail, items] = await Promise.all([
-      requestJson<Run>(`/projects/${PROJECT_ID}/experiments/${experimentId}`),
+      requestJson<Run>(`/projects/${getProjectId()}/experiments/${experimentId}`),
       loadManifest(experimentId, offset),
     ]);
     setSelectedId(experimentId);
@@ -318,15 +318,15 @@ export function RunsView({
       if (experimentStatus !== "all") params.set("status", experimentStatus);
       if (experimentMode !== "all") params.set("execution_mode", experimentMode);
       const [releaseRows, datasetRows, evaluatorRows, experimentPageRows] = await Promise.all([
-        requestJson<AgentRelease[]>(`/projects/${PROJECT_ID}/agent-releases`),
-        requestJson<Dataset[]>(`/projects/${PROJECT_ID}/datasets`),
-        requestJson<Evaluator[]>(`/projects/${PROJECT_ID}/evaluators`),
-        requestJson<ExperimentPage>(`/projects/${PROJECT_ID}/experiments?${params.toString()}`),
+        requestJson<AgentRelease[]>(`/projects/${getProjectId()}/agent-releases`),
+        requestJson<Dataset[]>(`/projects/${getProjectId()}/datasets`),
+        requestJson<Evaluator[]>(`/projects/${getProjectId()}/evaluators`),
+        requestJson<ExperimentPage>(`/projects/${getProjectId()}/experiments?${params.toString()}`),
       ]);
       const experimentRows = experimentPageRows.items;
       const endpointIndependent = releaseRows.filter((item) => item.enabled);
       const versionGroups = await Promise.all(datasetRows.map(async (dataset) => {
-        const versions = await requestJson<DatasetVersion[]>(`/projects/${PROJECT_ID}/datasets/${dataset.id}/versions`);
+        const versions = await requestJson<DatasetVersion[]>(`/projects/${getProjectId()}/datasets/${dataset.id}/versions`);
         return versions.map((version) => ({ ...version, datasetId: dataset.id, datasetName: dataset.name, current: version.id === dataset.current_version_id }));
       }));
       const datasetOptions = versionGroups.flat();
@@ -385,7 +385,7 @@ export function RunsView({
     setSubmitBusy(true);
     setNotice(null);
     try {
-      const created = await requestJson<Run>(`/projects/${PROJECT_ID}/experiments`, {
+      const created = await requestJson<Run>(`/projects/${getProjectId()}/experiments`, {
         method: "POST",
         body: JSON.stringify({
           name: name.trim(),
@@ -413,7 +413,7 @@ export function RunsView({
     if (!run) return;
     setSubmitBusy(true);
     try {
-      const cancelled = await requestJson<Run>(`/projects/${PROJECT_ID}/experiments/${run.id}/cancel`, { method: "POST" });
+      const cancelled = await requestJson<Run>(`/projects/${getProjectId()}/experiments/${run.id}/cancel`, { method: "POST" });
       setRun(cancelled);
       setExperiments((current) => current.map((item) => item.id === cancelled.id ? cancelled : item));
       setNotice({ tone: "neutral", text: "Experiment 已取消，晚到结果不会改变终态。" });

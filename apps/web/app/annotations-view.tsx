@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, CircleAlert, ClipboardCheck, Link2, LoaderCircle, Plus, RefreshCw, Save } from "lucide-react";
-import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
+import { API_URL, getProjectId, getSessionToken, fetchApi } from "./api-client";
 
 type Evaluator = { id: string; name: string; version: string; evaluator_type: "deterministic" | "llm_judge" | "adapter" | "human"; rubric: string | null; enabled: boolean };
 type Experiment = { id: string; name: string; status: string; created_at: string };
@@ -14,7 +14,7 @@ type Score = { id: string; value: number | null; label: string | null; passed: b
 type Audit = { id: string; action: "created" | "updated"; reviewer: string; previous_value: Record<string, unknown> | null; new_value: Record<string, unknown>; created_at: string };
 
 function headers(): HeadersInit {
-  return { "Content-Type": "application/json", "Authorization": `Bearer ${SESSION}` };
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${getSessionToken()}` };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -69,9 +69,9 @@ export function AnnotationsView({ onOpenTrace }: { onOpenTrace: (traceId: string
     setLoading(true);
     try {
       const [queueRows, evaluatorRows, experimentPage] = await Promise.all([
-        requestJson<Queue[]>(`/projects/${PROJECT_ID}/annotation-queues`),
-        requestJson<Evaluator[]>(`/projects/${PROJECT_ID}/evaluators`),
-        requestJson<ExperimentPage>(`/projects/${PROJECT_ID}/experiments?limit=200`),
+        requestJson<Queue[]>(`/projects/${getProjectId()}/annotation-queues`),
+        requestJson<Evaluator[]>(`/projects/${getProjectId()}/evaluators`),
+        requestJson<ExperimentPage>(`/projects/${getProjectId()}/experiments?limit=200`),
       ]);
       const experimentRows = experimentPage.items;
       setQueues(queueRows);
@@ -89,7 +89,7 @@ export function AnnotationsView({ onOpenTrace }: { onOpenTrace: (traceId: string
   async function loadItems(queueId: string) {
     if (!queueId) { setItems([]); return; }
     try {
-      const rows = await requestJson<QueueItem[]>(`/projects/${PROJECT_ID}/annotation-queues/${queueId}/items`);
+      const rows = await requestJson<QueueItem[]>(`/projects/${getProjectId()}/annotation-queues/${queueId}/items`);
       setItems(rows);
       setSelectedItemId((current) => rows.some((item) => item.id === current) ? current : rows[0]?.id ?? "");
     } catch (error) {
@@ -104,7 +104,7 @@ export function AnnotationsView({ onOpenTrace }: { onOpenTrace: (traceId: string
     setManifest(null);
     if (!experimentId) return;
     try {
-      const loaded = await requestJson<Manifest>(`/projects/${PROJECT_ID}/experiments/${experimentId}/manifest?limit=200`);
+      const loaded = await requestJson<Manifest>(`/projects/${getProjectId()}/experiments/${experimentId}/manifest?limit=200`);
       setManifest(loaded);
       setSelectedCaseId(loaded.items[0]?.case.id ?? "");
     } catch (error) {
@@ -118,14 +118,14 @@ export function AnnotationsView({ onOpenTrace }: { onOpenTrace: (traceId: string
     setValue(""); setLabel(""); setPassed(true); setExplanation(""); setEvidenceText("[]");
     if (!queueId || !item) return;
     try {
-      const current = await requestJson<Score>(`/projects/${PROJECT_ID}/annotation-queues/${queueId}/items/${item.id}/score`);
+      const current = await requestJson<Score>(`/projects/${getProjectId()}/annotation-queues/${queueId}/items/${item.id}/score`);
       setScore(current);
       setValue(current.value === null ? "" : String(current.value));
       setLabel(current.label ?? "");
       setPassed(current.passed ?? false);
       setExplanation(current.explanation ?? "");
       setEvidenceText(formatJson(current.evidence));
-      const audits = await requestJson<Audit[]>(`/projects/${PROJECT_ID}/annotation-queues/${queueId}/scores/${current.id}/audit`);
+      const audits = await requestJson<Audit[]>(`/projects/${getProjectId()}/annotation-queues/${queueId}/scores/${current.id}/audit`);
       setAudit(audits);
     } catch (error) {
       if (error instanceof Error && error.message === "human score not found") return;
@@ -141,7 +141,7 @@ export function AnnotationsView({ onOpenTrace }: { onOpenTrace: (traceId: string
     if (!queueName.trim() || !queueEvaluatorId) { setNotice("请填写队列名称并选择人工评估器。"); return; }
     setBusy(true);
     try {
-      const created = await requestJson<Queue>(`/projects/${PROJECT_ID}/annotation-queues`, { method: "POST", body: JSON.stringify({ name: queueName.trim(), description: queueDescription.trim() || null, evaluator_version_id: queueEvaluatorId }) });
+      const created = await requestJson<Queue>(`/projects/${getProjectId()}/annotation-queues`, { method: "POST", body: JSON.stringify({ name: queueName.trim(), description: queueDescription.trim() || null, evaluator_version_id: queueEvaluatorId }) });
       setQueueName(""); setQueueDescription(""); setNotice(`人工评审队列“${created.name}”已创建。`);
       await loadWorkspace(created.id);
     } catch (error) {
@@ -153,7 +153,7 @@ export function AnnotationsView({ onOpenTrace }: { onOpenTrace: (traceId: string
     if (!selectedQueue || !selectedExperimentId || !selectedCaseId) { setNotice("请选择 Experiment 和其中的 Case。 "); return; }
     setBusy(true);
     try {
-      const created = await requestJson<QueueItem>(`/projects/${PROJECT_ID}/annotation-queues/${selectedQueue.id}/items`, { method: "POST", body: JSON.stringify({ run_id: selectedExperimentId, case_id: selectedCaseId }) });
+      const created = await requestJson<QueueItem>(`/projects/${getProjectId()}/annotation-queues/${selectedQueue.id}/items`, { method: "POST", body: JSON.stringify({ run_id: selectedExperimentId, case_id: selectedCaseId }) });
       setNotice(`Case ${created.case_id} 已加入人工评审队列。`);
       await loadItems(selectedQueue.id);
       setSelectedItemId(created.id);
@@ -175,10 +175,10 @@ export function AnnotationsView({ onOpenTrace }: { onOpenTrace: (traceId: string
     } catch (error) { setNotice(`证据格式无效：${error instanceof Error ? error.message : "无法解析"}`); return; }
     setBusy(true);
     try {
-      const saved = await requestJson<Score>(`/projects/${PROJECT_ID}/annotation-queues/${selectedQueue.id}/items/${selectedItem.id}/score`, { method: "PUT", body: JSON.stringify({ value: numericValue, label: label.trim() || null, passed, explanation: explanation.trim() || null, evidence }) });
+      const saved = await requestJson<Score>(`/projects/${getProjectId()}/annotation-queues/${selectedQueue.id}/items/${selectedItem.id}/score`, { method: "PUT", body: JSON.stringify({ value: numericValue, label: label.trim() || null, passed, explanation: explanation.trim() || null, evidence }) });
       setNotice("人工评分已保存，并写入不可变审计记录。 ");
       setScore(saved);
-      const audits = await requestJson<Audit[]>(`/projects/${PROJECT_ID}/annotation-queues/${selectedQueue.id}/scores/${saved.id}/audit`);
+      const audits = await requestJson<Audit[]>(`/projects/${getProjectId()}/annotation-queues/${selectedQueue.id}/scores/${saved.id}/audit`);
       setAudit(audits);
       await loadItems(selectedQueue.id);
     } catch (error) {

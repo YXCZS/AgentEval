@@ -19,6 +19,8 @@ from agent_eval_api.evaluation_runs import experiments_router
 from agent_eval_api.evaluation_runs import router as evaluation_runs_router
 from agent_eval_api.evaluator_connections import router as evaluator_connections_router
 from agent_eval_api.evaluators import router as evaluators_router
+from agent_eval_api.observability import configure as configure_observability
+from agent_eval_api.observability import record_api_error
 from agent_eval_api.project_keys import router as project_keys_router
 from agent_eval_api.provider_connections import router as provider_connections_router
 from agent_eval_api.regression_gates import router as regression_gates_router
@@ -31,6 +33,7 @@ from agent_eval_api.users import router as users_router
 
 def create_app() -> FastAPI:
     validate_runtime_credential_configuration(get_settings())
+    configure_observability()
     app = FastAPI(
         title="Agent Eval Workbench API",
         version="0.1.0",
@@ -91,6 +94,23 @@ def create_app() -> FastAPI:
             for error in exc.errors()
         ]
         return JSONResponse(status_code=422, content={"detail": safe_errors})
+
+    @app.exception_handler(Exception)
+    async def handle_unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
+        """Log every unhandled error and return a safe 500 response.
+
+        This is the single choke point for server errors: operators can alert on
+        ``api_error`` log records (by status=500 or by a rising rate) without
+        depending on an external error tracker.
+        """
+        record_api_error(
+            method=request.method,
+            path=request.url.path,
+            status_code=500,
+            detail="internal server error",
+            exc=exc,
+        )
+        return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
     app.include_router(agent_releases_router)
     app.include_router(migrations_router)

@@ -7,7 +7,7 @@ browser uses to reach that project's data.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,8 +15,8 @@ from agent_eval_api.auth import get_db
 from agent_eval_api.contracts import (
     LoginRequest,
     LoginResponse,
-    UserCreateRequest,
     UserCreatedResponse,
+    UserCreateRequest,
     UserListResponse,
     UserResetPasswordRequest,
     UserResponse,
@@ -39,11 +39,12 @@ def user_response(user: UserRecord) -> UserResponse:
         project_id=user.project_id,
         created_at=user.created_at,
         last_login_at=user.last_login_at,
+        deleted_at=user.deleted_at,
     )
 
 
 def get_current_user_from_bearer(
-    authorization: str | None = Header(default=None),
+    authorization: str | None = Header(default=None, include_in_schema=False),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> UserRecord:
@@ -56,7 +57,7 @@ def get_current_user_from_bearer(
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired token")
     user = db.get(UserRecord, user_id)
-    if user is None or not user.active:
+    if user is None or not user.active or user.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or inactive user")
     return user
 
@@ -74,7 +75,12 @@ def login(
     settings: Settings = Depends(get_settings),
 ) -> LoginResponse:
     user = db.scalar(select(UserRecord).where(UserRecord.email == payload.email))
-    if user is None or not user.active or not verify_password(payload.password, user.password_hash):
+    if (
+        user is None
+        or not user.active
+        or user.deleted_at is not None
+        or not verify_password(payload.password, user.password_hash)
+    ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid email or password")
     user.last_login_at = utc_now()
     db.commit()
@@ -123,8 +129,12 @@ def list_users(
     db: Session = Depends(get_db),
     _: UserRecord = Depends(require_admin),
 ) -> UserListResponse:
-    """Admin-only listing of every provisioned account."""
-    rows = db.scalars(select(UserRecord).order_by(UserRecord.created_at)).all()
+    """Admin-only listing of every provisioned, non-deleted account."""
+    rows = db.scalars(
+        select(UserRecord)
+        .where(UserRecord.deleted_at.is_(None))
+        .order_by(UserRecord.created_at)
+    ).all()
     return UserListResponse(
         items=[user_response(user) for user in rows],
         total=len(rows),
@@ -156,17 +166,23 @@ def delete_user(
     db: Session = Depends(get_db),
     admin: UserRecord = Depends(require_admin),
 ) -> None:
-    """Admin-only deletion. Cascade-removes the user's private project namespace."""
+    """Admin-only soft deletion.
+
+    Marks the account as deleted (``deleted_at``) and deactivates it, but keeps
+    the user row and its private project namespace intact. This makes deletion
+    reversible and auditable: the account can no longer log in or access data,
+    yet nothing is irreversibly lost. Hard deletion remains a manual, out-of-band
+    database operation only.
+    """
     if user_id == admin.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cannot delete yourself")
     user = db.get(UserRecord, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
-    project_id = user.project_id
-    db.delete(user)
-    project = db.get(ProjectRecord, project_id)
-    if project is not None:
-        db.delete(project)
+    if user.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+    user.active = False
+    user.deleted_at = utc_now()
     db.commit()
 
 

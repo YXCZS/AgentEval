@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { LockKeyhole, LogIn } from "lucide-react";
-import { API_URL, fetchApi, loadAuth, setSession, type AuthState } from "./api-client";
+import { API_URL, fetchApi, type AuthState } from "./api-client";
 
 type LoginResult = {
   access_token: string;
@@ -40,7 +40,6 @@ export function LoginView({ onAuthed }: { onAuthed: (auth: AuthState) => void })
         displayName: body.user.display_name,
         role: body.user.role,
       };
-      setSession(auth);
       onAuthed(auth);
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "登录失败");

@@ -17,7 +17,7 @@ import {
   Workflow,
   XCircle,
 } from "lucide-react";
-import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
+import { API_URL, getProjectId, getSessionToken, fetchApi } from "./api-client";
 
 type ExecutionStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 type TraceSummary = {
@@ -130,7 +130,7 @@ const scoreStatusLabels: Record<Score["status"], string> = {
 };
 
 function requestHeaders(): HeadersInit {
-  return { "Content-Type": "application/json", "Authorization": `Bearer ${SESSION}` };
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${getSessionToken()}` };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -328,8 +328,8 @@ export function TracesView({
     setCreatedCase(null);
     try {
       const [trace, traceTimeline] = await Promise.all([
-        requestJson<Trace>(`/projects/${PROJECT_ID}/traces/${encodeURIComponent(traceId)}`),
-        requestJson<Timeline>(`/projects/${PROJECT_ID}/traces/${encodeURIComponent(traceId)}/timeline`),
+        requestJson<Trace>(`/projects/${getProjectId()}/traces/${encodeURIComponent(traceId)}`),
+        requestJson<Timeline>(`/projects/${getProjectId()}/traces/${encodeURIComponent(traceId)}/timeline`),
       ]);
       setDetail(trace);
       setTimeline(traceTimeline);
@@ -365,7 +365,7 @@ export function TracesView({
       const params = new URLSearchParams({ limit: "25", offset: String(requestedOffset) });
       if (query.trim()) params.set("query", query.trim());
       if (statusFilter !== "all") params.set("status", statusFilter);
-      const page = await requestJson<TraceSummaryPage>(`/projects/${PROJECT_ID}/traces?${params.toString()}`);
+      const page = await requestJson<TraceSummaryPage>(`/projects/${getProjectId()}/traces?${params.toString()}`);
       setTraces(page.items);
       setTracePage(page);
       const nextId = preferredId && page.items.some((item) => item.trace_id === preferredId)
@@ -386,7 +386,7 @@ export function TracesView({
     setVersionId("");
     if (!nextDatasetId) { setDatasetVersions([]); return; }
     try {
-      const versions = await requestJson<DatasetVersion[]>(`/projects/${PROJECT_ID}/datasets/${nextDatasetId}/versions`);
+      const versions = await requestJson<DatasetVersion[]>(`/projects/${getProjectId()}/datasets/${nextDatasetId}/versions`);
       setDatasetVersions(versions);
       const current = datasets.find((dataset) => dataset.id === nextDatasetId)?.current_version_id;
       setVersionId(current && versions.some((version) => version.id === current) ? current : versions[versions.length - 1]?.id ?? "");
@@ -400,7 +400,7 @@ export function TracesView({
     if (datasets.length > 0) return;
     setDatasetsLoading(true);
     try {
-      const loaded = await requestJson<Dataset[]>(`/projects/${PROJECT_ID}/datasets`);
+      const loaded = await requestJson<Dataset[]>(`/projects/${getProjectId()}/datasets`);
       setDatasets(loaded);
       const first = loaded[0];
       if (first) await loadDatasetVersions(first.id);
@@ -419,7 +419,7 @@ export function TracesView({
     setCreatingCase(true);
     setNotice(null);
     try {
-      const result = await requestJson<DatasetVersion>(`/projects/${PROJECT_ID}/datasets/${datasetId}/versions/${versionId}/cases/from-trace`, {
+      const result = await requestJson<DatasetVersion>(`/projects/${getProjectId()}/datasets/${datasetId}/versions/${versionId}/cases/from-trace`, {
         method: "POST",
         body: JSON.stringify({
           id: caseId.trim(),

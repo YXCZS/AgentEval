@@ -1,12 +1,15 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL?.trim() ?? "";
 
-// These are mutable live bindings: they start empty and are populated at login
-// time. All view components import them and read the current user's project id
-// and session token. See setSession() below.
-export let PROJECT_ID = "";
-export let SESSION = "";
-
 const AUTH_KEY = "agent-eval.auth";
+
+// The current session is kept in a module-private store rather than exported
+// bare `let` bindings. Readers go through getProjectId()/getSessionToken() and
+// writers go through setSession(), so there is a single, explicit mutation
+// point and no component mutates the value in place. This replaces the previous
+// exported mutable `PROJECT_ID`/`SESSION` bindings that views imported and read
+// directly (an implicit global with multi-user / hot-reload ordering hazards).
+let _projectId = "";
+let _sessionToken = "";
 
 // Custom event fired when a protected request returns 401 (expired/invalid
 // session). The shell listens for this and drops back to the login screen.
@@ -21,16 +24,24 @@ export type AuthState = {
   role: string;
 };
 
+export function getProjectId(): string {
+  return _projectId;
+}
+
+export function getSessionToken(): string {
+  return _sessionToken;
+}
+
 export function setSession(auth: AuthState | null): void {
   if (auth) {
-    PROJECT_ID = auth.projectId;
-    SESSION = auth.token;
+    _projectId = auth.projectId;
+    _sessionToken = auth.token;
     if (typeof window !== "undefined") {
       window.localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
     }
   } else {
-    PROJECT_ID = "";
-    SESSION = "";
+    _projectId = "";
+    _sessionToken = "";
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(AUTH_KEY);
     }

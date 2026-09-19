@@ -20,7 +20,7 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
-import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
+import { API_URL, getProjectId, getSessionToken, fetchApi } from "./api-client";
 
 type RunStatus =
   "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
@@ -246,7 +246,7 @@ type GateResult = {
 };
 
 function requestHeaders(): HeadersInit {
-  return { "Content-Type": "application/json", "Authorization": `Bearer ${SESSION}` };
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${getSessionToken()}` };
 }
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetchApi(`${API_URL}${path}`, {
@@ -415,7 +415,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
     setNotice(null);
     try {
       const next = await requestJson<ReportSummary[]>(
-        `/projects/${PROJECT_ID}/reports`,
+        `/projects/${getProjectId()}/reports`,
       );
       setSummaries(next);
       setRunId((current) => next.some((item) => item.run_id === current) ? current : next[0]?.run_id || "");
@@ -448,7 +448,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
     const refresh = async () => {
       try {
         const next = await requestJson<Report>(
-          `/projects/${PROJECT_ID}/reports/${runId}?${params.toString()}`,
+          `/projects/${getProjectId()}/reports/${runId}?${params.toString()}`,
           { signal: controller.signal },
         );
         if (stopped) return;
@@ -529,7 +529,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
     setNotice(null);
     try {
       setComparison(
-        await requestJson<Comparison>(`/projects/${PROJECT_ID}/comparisons`, {
+        await requestJson<Comparison>(`/projects/${getProjectId()}/comparisons`, {
           method: "POST",
           body: JSON.stringify({ run_ids: comparisonIds }),
         }),
@@ -575,7 +575,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
       rule.minimum = minimum;
     try {
       const nextGateResult = await requestJson<GateResult>(
-        `/projects/${PROJECT_ID}/runs/${runId}/regression-gate`,
+        `/projects/${getProjectId()}/runs/${runId}/regression-gate`,
         {
           method: "POST",
           body: JSON.stringify(
@@ -605,7 +605,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
     if (executionStatus) params.set("execution_status", executionStatus);
     try {
       const response = await fetchApi(
-        `${API_URL}/projects/${PROJECT_ID}/reports/${runId}/export?${params.toString()}`,
+        `${API_URL}/projects/${getProjectId()}/reports/${runId}/export?${params.toString()}`,
         { headers: requestHeaders() },
       );
       if (!response.ok) throw new Error(`导出失败（${response.status}）`);
@@ -644,7 +644,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
       : undefined;
     try {
       const response = await fetchApi(
-        `${API_URL}/projects/${PROJECT_ID}/comparisons/artifact?format=${format}`,
+        `${API_URL}/projects/${getProjectId()}/comparisons/artifact?format=${format}`,
         {
           method: "POST",
           headers: requestHeaders(),
@@ -673,7 +673,7 @@ export function ReportsView({ initialMode = "report" }: { initialMode?: ReportMo
     timelineRequestRef.current = controller;
     try {
       const nextTimeline = await requestJson<Timeline>(
-        `/projects/${PROJECT_ID}/traces/${item.trace_id}/timeline`,
+        `/projects/${getProjectId()}/traces/${item.trace_id}/timeline`,
         { signal: controller.signal },
       );
       if (!controller.signal.aborted && timelineRequestRef.current === controller) setTimeline(nextTimeline);
