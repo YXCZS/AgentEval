@@ -78,6 +78,32 @@ class ProjectRecord(Base):
     traces: Mapped[list[TraceRecord]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
+    users: Mapped[list[UserRecord]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+
+
+class UserRecord(Base):
+    """A human user. Each user owns exactly one project, which is their private data space."""
+
+    __tablename__ = "users"
+    __table_args__ = (Index("ix_users_project", "project_id"),)
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True, default=new_id)
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    role: Mapped[str] = mapped_column(String(32), default="member", nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    project: Mapped[ProjectRecord] = relationship(back_populates="users")
 
 
 class ApiKeyRecord(Base):

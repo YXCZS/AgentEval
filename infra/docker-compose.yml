@@ -30,6 +30,10 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       API_KEY_SALT: ${API_KEY_SALT:-local-compose-api-key-salt}
       WORKSPACE_SESSION_SECRET: ${WORKSPACE_SESSION_SECRET:-local-compose-session-secret}
+      JWT_SECRET: ${JWT_SECRET:-local-compose-jwt-secret}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-10080}
+      AGENT_EVAL_BOOTSTRAP_ADMIN_EMAIL: ${AGENT_EVAL_BOOTSTRAP_ADMIN_EMAIL:-}
+      AGENT_EVAL_BOOTSTRAP_ADMIN_PASSWORD: ${AGENT_EVAL_BOOTSTRAP_ADMIN_PASSWORD:-}
       AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY:-}
       AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID:-primary}
       AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS: '${AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS:-{}}'
@@ -57,6 +61,10 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       API_KEY_SALT: ${API_KEY_SALT:-local-compose-api-key-salt}
       WORKSPACE_SESSION_SECRET: ${WORKSPACE_SESSION_SECRET:-local-compose-session-secret}
+      JWT_SECRET: ${JWT_SECRET:-local-compose-jwt-secret}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-10080}
+      AGENT_EVAL_BOOTSTRAP_ADMIN_EMAIL: ${AGENT_EVAL_BOOTSTRAP_ADMIN_EMAIL:-}
+      AGENT_EVAL_BOOTSTRAP_ADMIN_PASSWORD: ${AGENT_EVAL_BOOTSTRAP_ADMIN_PASSWORD:-}
       AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY:-}
       AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID: ${AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY_ID:-primary}
       AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS: '${AGENT_EVAL_EXTERNAL_EVALUATOR_SECRETS:-{}}'
@@ -74,11 +82,13 @@ services:
   postgres:
     restart: unless-stopped
     image: postgres:16-alpine
-    ports:
-      - "5432:5432"
+    # 生产环境不要暴露数据库端口到宿主机，仅容器网络内可达。
+    # 如需本机调试，临时取消注释下面这行。
+    # ports:
+    #   - "5432:5432"
     environment:
       POSTGRES_USER: agent_eval
-      POSTGRES_PASSWORD: agent_eval
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_eval}
       POSTGRES_DB: agent_eval
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -91,8 +101,9 @@ services:
   redis:
     restart: unless-stopped
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # 生产环境不要暴露 Redis 端口到宿主机。
+    # ports:
+    #   - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

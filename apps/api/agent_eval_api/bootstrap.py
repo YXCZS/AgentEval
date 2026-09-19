@@ -17,6 +17,7 @@ from agent_eval_api.db import (
     ProviderConnectionRecord,
     TraceRecord,
     get_session_factory,
+    new_id,
 )
 from agent_eval_api.settings import get_settings
 
@@ -76,6 +77,50 @@ def ensure_default_project(session_factory: Callable[[], Session] | None = None)
         session.close()
 
 
+def ensure_bootstrap_admin(session_factory: Callable[[], Session] | None = None) -> None:
+    """Create the initial admin user from environment variables if no user exists.
+
+    This is a one-time provisioning step so the first administrator can log in
+    and begin creating member accounts. Without it, a fresh deployment has no
+    way to provision users (registration is admin-only by design).
+    """
+    settings = get_settings()
+    if not settings.bootstrap_admin_email or not settings.bootstrap_admin_password:
+        return
+    session = (session_factory or get_session_factory())()
+    try:
+        from sqlalchemy import select
+
+        from agent_eval_api.db import UserRecord
+        from agent_eval_api.security import hash_password
+
+        existing = session.scalar(
+            select(UserRecord).where(UserRecord.email == settings.bootstrap_admin_email)
+        )
+        if existing is not None:
+            return
+        project = session.get(ProjectRecord, DEFAULT_PROJECT_ID)
+        if project is None:
+            project = ProjectRecord(id=DEFAULT_PROJECT_ID, name="Admin workspace")
+            session.add(project)
+            session.flush()
+        session.add(
+            UserRecord(
+                id=new_id(),
+                email=settings.bootstrap_admin_email,
+                password_hash=hash_password(settings.bootstrap_admin_password.get_secret_value()),
+                display_name="Administrator",
+                role="admin",
+                active=True,
+                project_id=project.id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
 if __name__ == "__main__":
     get_settings()
     ensure_default_project()
+    ensure_bootstrap_admin()

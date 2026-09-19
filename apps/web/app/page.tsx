@@ -14,9 +14,11 @@ import {
   FileChartColumn,
   FlaskConical,
   Gauge,
+  LogOut,
   Play,
   Search,
   ShieldCheck,
+  Users,
   Workflow,
   XCircle,
 } from "lucide-react";
@@ -27,7 +29,9 @@ import { EvaluatorsView } from "./evaluators-view";
 import { ReportsView } from "./reports-view";
 import { RunsView } from "./runs-view";
 import { TracesView } from "./traces-view";
-import { API_URL, PROJECT_ID, SESSION, fetchApi } from "./api-client";
+import { LoginView } from "./login-view";
+import { MembersView } from "./members-view";
+import { API_URL, PROJECT_ID, SESSION, fetchApi, loadAuth, clearAuth, setSession, AUTH_EXPIRED_EVENT, type AuthState } from "./api-client";
 
 type ViewKey =
   | "overview"
@@ -38,7 +42,8 @@ type ViewKey =
   | "traces"
   | "regression"
   | "gates"
-  | "connections";
+  | "connections"
+  | "members";
 
 type IconComponent = typeof Gauge;
 type TraceSummary = {
@@ -103,15 +108,19 @@ const navItems: Array<{ key: ViewKey; label: string; icon: IconComponent }> = [
   { key: "connections", label: "Release 与接入", icon: Package },
 ];
 
+const adminOnlyNavItems: Array<{ key: ViewKey; label: string; icon: IconComponent }> = [
+  { key: "members", label: "成员管理", icon: Users },
+];
+
 const viewLabels: Record<ViewKey, string> = Object.fromEntries(
-  navItems.map((item) => [item.key, item.label]),
+  [...navItems, ...adminOnlyNavItems].map((item) => [item.key, item.label]),
 ) as Record<ViewKey, string>;
 
 async function requestJson<T>(path: string): Promise<T> {
   const response = await fetchApi(`${API_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
-      "X-Workspace-Session": SESSION,
+      "Authorization": `Bearer ${SESSION}`,
     },
     cache: "no-store",
   });
@@ -325,11 +334,44 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [selectedTraceId, setSelectedTraceId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
+  const [auth, setAuth] = useState<AuthState | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    const existing = loadAuth();
+    if (existing) {
+      setSession(existing);
+      setAuth(existing);
+    }
+    setAuthReady(true);
+  }, []);
+
+  function handleAuthed(next: AuthState) {
+    setAuth(next);
+  }
+
+  function handleLogout() {
+    clearAuth();
+    setAuth(null);
+    setActiveView("overview");
+  }
+
+  // When any protected request returns 401 (expired/revoked session), drop back
+  // to the login screen instead of leaving the user on a stale "logged-in" UI.
+  useEffect(() => {
+    function handleAuthExpired() {
+      setAuth(null);
+      setActiveView("overview");
+    }
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+  }, []);
 
   function readLocation() {
     const params = new URLSearchParams(window.location.search);
     const requestedView = params.get("view");
-    const view = navItems.some((item) => item.key === requestedView)
+    const allNavItems = [...navItems, ...adminOnlyNavItems];
+    const view = allNavItems.some((item) => item.key === requestedView)
       ? requestedView as ViewKey
       : "overview";
     setActiveView(view);
@@ -365,17 +407,26 @@ export default function Home() {
   }
 
   const activeLabel = viewLabels[activeView];
+
+  if (!authReady) {
+    return <div className="app-shell"><div className="login-screen"><div className="panel login-loading">正在加载…</div></div></div>;
+  }
+
+  if (!auth) {
+    return <LoginView onAuthed={handleAuthed} />;
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">AE</div><div><strong>Agent Eval</strong><span>质量评测工作台</span></div></div>
-        <div className="workspace-current" aria-label="当前项目"><span>当前项目</span><strong>{PROJECT_ID}</strong></div>
-        <nav aria-label="主导航">{navItems.map(({ key, label, icon: Icon }) => <button className={activeView === key ? "nav-item active" : "nav-item"} key={key} aria-label={label} onClick={() => navigate(key)}><Icon size={18} /><span>{label}</span>{key === "runs" && <i className="nav-count">{activeView === "runs" ? "·" : ""}</i>}</button>)}</nav>
-        <div className="sidebar-bottom"><ApiStatus /><div className="profile" aria-label="当前运行模式"><div className="avatar">AE</div><div><strong>单项目模式</strong><span>本地工作台</span></div></div></div>
+        <div className="workspace-current" aria-label="当前项目"><span>我的空间</span><strong>{PROJECT_ID}</strong></div>
+        <nav aria-label="主导航">{[...navItems, ...(auth.role === "admin" ? adminOnlyNavItems : [])].map(({ key, label, icon: Icon }) => <button className={activeView === key ? "nav-item active" : "nav-item"} key={key} aria-label={label} onClick={() => navigate(key)}><Icon size={18} /><span>{label}</span>{key === "runs" && <i className="nav-count">{activeView === "runs" ? "·" : ""}</i>}</button>)}</nav>
+        <div className="sidebar-bottom"><ApiStatus /><div className="profile" aria-label="当前用户"><div className="avatar">{auth.displayName.slice(0, 2).toUpperCase()}</div><div><strong>{auth.displayName}</strong><span>{auth.email}</span></div><button className="icon-button" title="退出登录" aria-label="退出登录" onClick={handleLogout}><LogOut size={17} /></button></div></div>
       </aside>
       <main className="main-content">
         <header className="topbar"><div className="breadcrumb"><span>质量评测工作台</span><b>/</b><strong>{activeLabel}</strong></div><div className="topbar-actions">{searchOpen && <label className="topbar-search"><Search size={15} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") submitSearch(); if (event.key === "Escape") { setSearchOpen(false); setQuery(""); } }} placeholder="搜索导航" aria-label="搜索导航" /></label>}<button className="icon-button" title="搜索导航" aria-label="搜索导航" onClick={() => setSearchOpen((open) => !open)}><Search size={18} /></button><button className="outline-button" onClick={() => navigate("traces")}><Activity size={16} />实时 Trace</button><button className="primary" onClick={() => navigate("runs")}><Play size={16} />新建评测</button></div>{notice && <div className="global-search-notice" role="status">{notice}</div>}</header>
-        <div className="page-content">{activeView === "overview" ? <Overview onNavigate={(view) => navigate(view)} /> : activeView === "datasets" ? <DatasetsView /> : activeView === "runs" ? <RunsView initialExperimentId={selectedRunId} onSelectExperiment={(runId) => navigate("runs", { runId })} onOpenTrace={openTrace} /> : activeView === "evaluators" ? <EvaluatorsView /> : activeView === "annotations" ? <AnnotationsView onOpenTrace={openTrace} /> : activeView === "regression" ? <ReportsView initialMode="compare" /> : activeView === "gates" ? <ReportsView initialMode="gate" /> : activeView === "connections" ? <ConnectionsView /> : <TracesView initialTraceId={selectedTraceId} onSelectTrace={(traceId) => navigate("traces", { traceId })} />}</div>
+        <div className="page-content">{activeView === "overview" ? <Overview onNavigate={(view) => navigate(view)} /> : activeView === "datasets" ? <DatasetsView /> : activeView === "runs" ? <RunsView initialExperimentId={selectedRunId} onSelectExperiment={(runId) => navigate("runs", { runId })} onOpenTrace={openTrace} /> : activeView === "evaluators" ? <EvaluatorsView /> : activeView === "annotations" ? <AnnotationsView onOpenTrace={openTrace} /> : activeView === "regression" ? <ReportsView initialMode="compare" /> : activeView === "gates" ? <ReportsView initialMode="gate" /> : activeView === "members" ? <MembersView auth={auth} /> : activeView === "connections" ? <ConnectionsView /> : <TracesView initialTraceId={selectedTraceId} onSelectTrace={(traceId) => navigate("traces", { traceId })} />}</div>
       </main>
     </div>
   );

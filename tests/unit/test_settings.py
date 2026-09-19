@@ -1,5 +1,7 @@
 from agent_eval_api.settings import Settings
 
+import pytest
+
 
 def test_settings_json_representation_masks_secrets() -> None:
     settings = Settings(
@@ -43,3 +45,25 @@ def test_external_evaluator_secret_map_uses_prefixed_json_environment(
         "team-judge"
     ].get_secret_value() == "runtime-signing-secret"
     assert "runtime-signing-secret" not in settings.model_dump_json()
+
+
+def test_production_rejects_placeholder_secrets() -> None:
+    with pytest.raises(ValueError, match="refusing to start in production"):
+        Settings(app_env="production", jwt_secret="development-jwt-secret-change-me")
+
+
+def test_production_accepts_strong_secrets() -> None:
+    settings = Settings(
+        app_env="production",
+        jwt_secret="a-strong-production-jwt-secret",
+        api_key_salt="a-strong-production-salt",
+        workspace_session_secret="a-strong-production-session-secret",
+    )
+    assert settings.app_env == "production"
+
+
+def test_development_allows_placeholder_secrets() -> None:
+    # Development must not fail closed: it starts regardless of secret strength.
+    settings = Settings(app_env="development")
+    assert settings.app_env == "development"
+    assert settings.jwt_secret.get_secret_value()  # non-empty

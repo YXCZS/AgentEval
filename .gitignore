@@ -24,6 +24,7 @@ build/
 *.log
 .firecrawl/
 .playwright-mcp/
+.workbuddy/
 *.tsbuildinfo
 *.egg-info/
 demo-result.json

@@ -26,6 +26,7 @@ from agent_eval_api.remote_triggers import router as remote_triggers_router
 from agent_eval_api.reports import router as reports_router
 from agent_eval_api.settings import get_settings
 from agent_eval_api.traces import router as traces_router
+from agent_eval_api.users import router as users_router
 
 
 def create_app() -> FastAPI:
@@ -107,6 +108,7 @@ def create_app() -> FastAPI:
     app.include_router(traces_router)
     app.include_router(project_keys_router)
     app.include_router(provider_connections_router)
+    app.include_router(users_router)
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     def health() -> HealthResponse:

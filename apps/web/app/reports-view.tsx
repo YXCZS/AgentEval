@@ -246,7 +246,7 @@ type GateResult = {
 };
 
 function requestHeaders(): HeadersInit {
-  return { "Content-Type": "application/json", "X-Workspace-Session": SESSION };
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${SESSION}` };
 }
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetchApi(`${API_URL}${path}`, {

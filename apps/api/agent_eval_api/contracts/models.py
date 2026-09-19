@@ -1504,3 +1504,49 @@ class DatasetImportPreviewResponse(ContractModel):
 class DatasetImportCommitResponse(ContractModel):
     dataset_version: DatasetVersion
     issues: list[DatasetImportIssueResponse] = Field(default_factory=list)
+
+
+class LoginRequest(ContractModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=4096)
+
+
+class UserResponse(ContractModel):
+    id: str
+    email: str
+    display_name: str
+    role: str
+    active: bool
+    project_id: str
+    created_at: datetime
+    last_login_at: datetime | None = None
+
+
+class UserListResponse(ContractModel):
+    items: list[UserResponse] = Field(default_factory=list)
+    total: int = Field(ge=0)
+
+
+class LoginResponse(ContractModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    user: UserResponse
+
+
+class UserCreateRequest(ContractModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=4096)
+    display_name: str = Field(min_length=1, max_length=200)
+    role: Literal["admin", "member"] = "member"
+
+
+class UserCreatedResponse(UserResponse):
+    pass
+
+
+class UserResetPasswordRequest(ContractModel):
+    password: str = Field(min_length=8, max_length=4096)
+
+
+class UserSetActiveRequest(ContractModel):
+    active: bool

@@ -85,6 +85,8 @@ from .models import (
     JudgeSamplingParameters,
     LegacyHttpAgentMigrationRequest,
     LegacyHttpAgentMigrationResponse,
+    LoginRequest,
+    LoginResponse,
     MetricComparison,
     OnlineScoreRequest,
     ProjectApiKey,
@@ -126,6 +128,12 @@ from .models import (
     TraceTimeline,
     TraceTimelineSpan,
     TraceToDatasetCaseRequest,
+    UserCreateRequest,
+    UserCreatedResponse,
+    UserListResponse,
+    UserResetPasswordRequest,
+    UserResponse,
+    UserSetActiveRequest,
 )
 
 __all__ = [
@@ -219,6 +227,8 @@ __all__ = [
     "JudgeSamplingParameters",
     "LegacyHttpAgentMigrationRequest",
     "LegacyHttpAgentMigrationResponse",
+    "LoginRequest",
+    "LoginResponse",
     "OnlineScoreRequest",
     "ProjectApiKey",
     "ProjectApiKeyCreated",
@@ -254,4 +264,10 @@ __all__ = [
     "TraceTimeline",
     "TraceTimelineSpan",
     "TraceToDatasetCaseRequest",
+    "UserCreateRequest",
+    "UserCreatedResponse",
+    "UserListResponse",
+    "UserResetPasswordRequest",
+    "UserResponse",
+    "UserSetActiveRequest",
 ]

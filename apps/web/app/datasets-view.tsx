@@ -77,7 +77,7 @@ const emptyMapping = (): Record<CanonicalField, string> => ({
 });
 
 function headers(json = true): HeadersInit {
-  return { ...(json ? { "Content-Type": "application/json" } : {}), "X-Workspace-Session": SESSION };
+  return { ...(json ? { "Content-Type": "application/json" } : {}), "Authorization": `Bearer ${SESSION}` };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {

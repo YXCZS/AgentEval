@@ -67,6 +67,7 @@ def require_project_access(
     project_id: str,
     x_project_key: str | None = Header(default=None),
     x_workspace_session: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> AuthContext:
@@ -94,6 +95,17 @@ def require_project_access(
         record.last_used_at = utc_now()
         db.commit()
         return AuthContext(project_id=project_id, principal_type="agent", credential_id=record.id)
+
+    if authorization and authorization.lower().startswith("bearer "):
+        from agent_eval_api.security import decode_access_token
+        from agent_eval_api.db import UserRecord
+
+        token = authorization.split(" ", 1)[1].strip()
+        user_id = decode_access_token(token, settings)
+        if user_id is not None:
+            user = db.get(UserRecord, user_id)
+            if user is not None and user.active and user.project_id == project_id:
+                return AuthContext(project_id=project_id, principal_type="browser", credential_id=user.id)
 
     if x_workspace_session:
         valid_sessions = [issue_dev_session(project_id, settings)]

@@ -1,8 +1,18 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Placeholder secrets shipped with the source tree. A production deployment must
+# override every one of these or the process refuses to start.
+_INSECURE_PLACEHOLDER_SECRETS = frozenset(
+    {
+        "development-only-change-me",
+        "development-session-secret",
+        "development-jwt-secret-change-me",
+    }
+)
 
 
 class Settings(BaseSettings):
@@ -20,6 +30,19 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     api_key_salt: SecretStr = SecretStr("development-only-change-me")
     workspace_session_secret: SecretStr = SecretStr("development-session-secret")
+    jwt_secret: SecretStr = Field(
+        default_factory=lambda: SecretStr("development-jwt-secret-change-me"),
+        validation_alias="JWT_SECRET",
+    )
+    jwt_access_token_expire_minutes: int = Field(
+        default=60 * 24 * 7, ge=5, le=60 * 24 * 365, validation_alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES"
+    )
+    bootstrap_admin_email: str | None = Field(
+        default=None, validation_alias="AGENT_EVAL_BOOTSTRAP_ADMIN_EMAIL"
+    )
+    bootstrap_admin_password: SecretStr | None = Field(
+        default=None, validation_alias="AGENT_EVAL_BOOTSTRAP_ADMIN_PASSWORD"
+    )
     credential_encryption_key: SecretStr | None = Field(
         default=None,
         validation_alias="AGENT_EVAL_CREDENTIAL_ENCRYPTION_KEY",
@@ -58,6 +81,31 @@ class Settings(BaseSettings):
         if "://" not in value:
             raise ValueError("must be a URL")
         return value
+
+    @model_validator(mode="after")
+    def _reject_placeholder_secrets_in_production(self) -> "Settings":
+        """Fail closed in production when a crypto secret is still a default.
+
+        The dev-only placeholders are meant to make local development "just
+        work". Running them in production would let anyone forge JWTs or project
+        keys, so we refuse to start instead of silently degrading security.
+        """
+        if self.app_env != "production":
+            return self
+
+        checks: list[tuple[str, str]] = [
+            ("JWT_SECRET", self.jwt_secret.get_secret_value()),
+            ("API_KEY_SALT", self.api_key_salt.get_secret_value()),
+            ("WORKSPACE_SESSION_SECRET", self.workspace_session_secret.get_secret_value()),
+        ]
+        insecure = [name for name, value in checks if value in _INSECURE_PLACEHOLDER_SECRETS]
+        if insecure:
+            names = ", ".join(insecure)
+            raise ValueError(
+                f"refusing to start in production: {names} must be set to strong, "
+                "non-default secrets (the development placeholders are not secure)"
+            )
+        return self
 
 
 @lru_cache

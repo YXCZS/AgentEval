@@ -14,7 +14,7 @@ type Score = { id: string; value: number | null; label: string | null; passed: b
 type Audit = { id: string; action: "created" | "updated"; reviewer: string; previous_value: Record<string, unknown> | null; new_value: Record<string, unknown>; created_at: string };
 
 function headers(): HeadersInit {
-  return { "Content-Type": "application/json", "X-Workspace-Session": SESSION };
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${SESSION}` };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {

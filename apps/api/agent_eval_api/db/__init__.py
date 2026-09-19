@@ -25,6 +25,7 @@ from .models import (
     ScoreRecord,
     TraceRecord,
     TraceSpanRecord,
+    UserRecord,
     new_id,
     utc_now,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "ScoreRecord",
     "TraceRecord",
     "TraceSpanRecord",
+    "UserRecord",
     "get_engine",
     "get_session_factory",
     "new_id",

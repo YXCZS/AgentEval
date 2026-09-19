@@ -105,7 +105,7 @@ type DatasetOption = DatasetVersion & { datasetId: string; datasetName: string; 
 type Notice = { tone: "success" | "danger" | "neutral"; text: string };
 
 function requestHeaders(): HeadersInit {
-  return { "Content-Type": "application/json", "X-Workspace-Session": SESSION };
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${SESSION}` };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
