@@ -224,6 +224,7 @@ python tests/live/run_rag_evaluation_acceptance.py
 - [零基础使用指南](docs/usage.md)
 - [架构与数据流](docs/architecture.md)
 - [参考产品、架构来源与边界](docs/reference-comparison.md)
+- [Jev 决策模型调研与后续方向](docs/judge-jev-investigation.md)
 - [外部协议](docs/external-protocols.md)
 - [Trace 接入范围](docs/trace-ingestion.md)
 - [单机部署与运维](docs/operations.md)
